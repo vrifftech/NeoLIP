@@ -1,0 +1,21 @@
+clo    1 ;
+fnt    3 ;
+mid    3 ;
+bck    3 ;
+ret    2 ;
+lat    2 ;
+lab    1 ;
+den    1 ;
+alv    1 ;
+dor    1 ;
+
+$clo = clo /BOU /EOU .garbage ;
+$fnt = fnt ;
+$mid = mid ;
+$bck = bck ;
+$ret = ret ;
+$lat = lat ;
+$lab = lab ;
+$den = den ;
+$alv = alv ;
+$dor = dor ;

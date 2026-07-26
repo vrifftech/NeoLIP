@@ -1,0 +1,80 @@
+word	status	old_pronunciation	new_pronunciation	source_page	source_pronunciation	source_url	note
+dantooine	confirmed	dc d & n tc th u i: n	dc d & n tc th u i: n	Dantooine/Legends	/'dæntuin/	https://starwars.fandom.com/wiki/Dantooine/Legends	Explicit Wookieepedia pronunciation.
+kashyyyk	confirmed	kc kh & S I kc kh	kc kh & S I kc kh	Kashyyyk/Legends	KOTOR/Republic Commando variant /'kæʃɨk/	https://starwars.fandom.com/wiki/Kashyyyk/Legends	Kept KOTOR/Republic Commando variant; source lists several variants.
+kreia	confirmed	kc kh 9r ei @	kc kh 9r ei @	Kreia	/ˈkreɪə/	https://starwars.fandom.com/wiki/Kreia	Explicit Wookieepedia pronunciation.
+traya	confirmed	tc th 9r ei @	tc th 9r ei @	Kreia / Darth Traya section	/ˈtreɪə/	https://starwars.fandom.com/wiki/Kreia	Alias from Wookieepedia page.
+nihilus	confirmed	n aI @ l @ s	n aI @ l @ s	Darth Nihilus	/ˈnaɪ.ə.ləs/	https://starwars.fandom.com/wiki/Darth_Nihilus	Explicit Wookieepedia pronunciation.
+bao-dur	confirmed	bc b ei oU dc d u 9r	bc b ei oU dc d u 9r	Bao-Dur	/beo dur/	https://starwars.fandom.com/wiki/Bao-Dur	Bay-oh dur style conversion.
+zaalbar	confirmed	z A l bc b A 9r	z A l bc b A 9r	Zaalbar	/'zɑlbɑɹ/	https://starwars.fandom.com/wiki/Zaalbar	Explicit Wookieepedia pronunciation.
+dxun	confirmed	dc d ^ kc kh s I n	dc d ^ kc kh s I n	Dxun/Legends	/'dʌ.ksɪn/	https://starwars.fandom.com/wiki/Dxun/Legends	Explicit Wookieepedia pronunciation.
+twi'lek	confirmed	tc th w i: l E kc kh	tc th w i: l E kc kh	Twi'lek	Twee'lek/Twy'lek variants documented	https://starwars.fandom.com/wiki/Twi%27lek	Retained first listed twee-lek style because dictionary stores one slot per token.
+twilek	confirmed	tc th w i: l E kc kh	tc th w i: l E kc kh	Twi'lek	Twee'lek/Twy'lek variants documented	https://starwars.fandom.com/wiki/Twi%27lek	Apostropheless normalization alias.
+tatooine	confirmed	tc th & tc th u i: n	tc th & tc th u i: n	Tatooine/Legends	/tætu'in/	https://starwars.fandom.com/wiki/Tatooine/Legends	Explicit Wookieepedia pronunciation.
+vao	confirmed	v ei oU	v ei oU	Mission Vao	/'mɪʃɪn 'veo/	https://starwars.fandom.com/wiki/Mission_Vao	Surname only; did not override common word mission.
+cede	confirmed	s i: dc d	s i: dc d	Cede	/seed/	https://starwars.fandom.com/wiki/Cede	KOTOR II name.
+ziost	confirmed	z i: A s tc th	z i: A s tc th	Ziost/Legends	/ziɒst/	https://starwars.fandom.com/wiki/Ziost/Legends	Explicit Wookieepedia pronunciation.
+coruscant	confirmed	kc kh > 9r @ s A n tc th	kc kh > 9r @ s A n tc th	Coruscant	/'kɔɹəsɑnt/	https://starwars.fandom.com/wiki/Coruscant	Primary pronunciation.
+freyyr	confirmed	f 9r ei 9r	f 9r ei 9r	Freyyr	/fɹeɹ/	https://starwars.fandom.com/wiki/Freyyr	Wookiee chieftain token.
+kaevee	confirmed	kc kh ei v i:	kc kh ei v i:	Kaevee	/keɪ'vi/	https://starwars.fandom.com/wiki/Kaevee	Explicit Wookieepedia pronunciation.
+yavin	confirmed	j A v I n	j A v I n	Yavin Prime/Legends	YAH-vin	https://starwars.fandom.com/wiki/Yavin_Prime/Legends	Explicit Wookieepedia pronunciation.
+taris	confirmed	tc th E 9r I s	tc th E 9r I s	Taris/Legends	KOTOR first syllable varies tar/terr	https://starwars.fandom.com/wiki/Taris/Legends	Kept existing terr-is variant because source documents variation.
+saleucami	added		s ^ l u kc kh @ m aI	Saleucami/Legends	/sʌ'lukəˌmaɪ/	https://starwars.fandom.com/wiki/Saleucami/Legends	Uses first listed pronunciation; SWTOR alternate noted in source but not used.
+zsinj	added		z I n dZc dZ	Zsinj	/zɪnd͡ʒ/	https://starwars.fandom.com/wiki/Zsinj	Broader Legends name.
+xizor	added		S i: z oU 9r	Xizor/Legends	/shē'zōr/	https://starwars.fandom.com/wiki/Xizor/Legends	Broader Legends name.
+chimaera	added		kc kh aI m I 9r @	Chimaera	/kaɪˈmɪərə/	https://starwars.fandom.com/wiki/Chimaera	Thrawn flagship token.
+csilla	added		tSc tS i: l @	Csilla	/ˈt͡ʃiːlə/	https://starwars.fandom.com/wiki/Csilla	Chiss homeworld token.
+saponza	added		s @ pc ph & n z @	Saponza	/sə.ˈpæn.zə/	https://starwars.fandom.com/wiki/Saponza	Broader Star Wars name.
+j'aahn	added		dZc dZ > n	J'aahn	/ˈʤɔn/	https://starwars.fandom.com/wiki/J%27aahn	Apostrophe form.
+jaahn	added		dZc dZ > n	J'aahn	/ˈʤɔn/	https://starwars.fandom.com/wiki/J%27aahn	Apostropheless alias.
+sabé	added		s A bc b ei	Sabé	/sɑ'beɪ/	https://starwars.fandom.com/wiki/Sab%C3%A9	Accent-preserving form.
+sabe	added		s A bc b ei	Sabé	/sɑ'beɪ/	https://starwars.fandom.com/wiki/Sab%C3%A9	ASCII alias.
+gorse	added		gc g > 9r s	Gorse	/gɔːɹs/	https://starwars.fandom.com/wiki/Gorse	Broader Star Wars planet token.
+tantive	added		tc th & n tc th I v i:	Tantive IV planet	/ˈtæntɪˌvi 'fɔ:r/	https://starwars.fandom.com/wiki/Tantive_IV_(planet)	Name component only; IV handled by roman numeral normalization.
+skotia	added		s kc kh oU S @	Darth Skotia	/ˈskoʊʃə/; alternate /skoˈteˈa/	https://starwars.fandom.com/wiki/Darth_Skotia	Kept first listed variant.
+eadu	added		i: dc d u	Eadu	/ˈiːduː/	https://starwars.fandom.com/wiki/Eadu	Rogue One planet.
+kamino	added		kc kh @ m i: n oU	Kamino	/kə'minoʊ/	https://starwars.fandom.com/wiki/Kamino	Explicit Wookieepedia pronunciation.
+kaminoan	added		kc kh @ m i: n oU @ n	Kamino	derived from /kə'minoʊ/ + -an	https://starwars.fandom.com/wiki/Kamino	Derived species/demonym from sourced base.
+kaminoans	added		kc kh @ m i: n oU @ n z	Kamino	derived from /kə'minoʊ/ + -ans	https://starwars.fandom.com/wiki/Kamino	Plural species/demonym alias.
+ahch-to	added		A kc kh tc th oU	Ahch-To	/ɑkˈtoʊ/	https://starwars.fandom.com/wiki/Ahch-To	Explicit Wookieepedia pronunciation.
+ahch	added		A kc kh	Ahch-To	first part of /ɑkˈtoʊ/	https://starwars.fandom.com/wiki/Ahch-To	Hyphen component alias.
+tibrin	added		tc th I bc b 9r I n	Tibrin/Legends	/ˈtɪbrɪn/ or /tɪˈbrɪn/	https://starwars.fandom.com/wiki/Tibrin/Legends	Kept first listed pronunciation.
+utapau	added		u tc th @ pc ph aU	Utapau/Legends	/'ʔuːtəˌpaʊ/	https://starwars.fandom.com/wiki/Utapau/Legends	Ignored glottal stop in CSLU phone mapping.
+kalevala	added		kc kh A l ei v A l @	Kalevala	Kah-lay-vah-lah; alternate Kall-vah-lah	https://starwars.fandom.com/wiki/Kalevala	Kept later source variant noted by Wookieepedia.
+plagueis	added		pc ph l ei gc g @ s	Darth Plagueis	/'pleɪɡ.əs/	https://starwars.fandom.com/wiki/Darth_Plagueis	Explicit Wookieepedia pronunciation.
+opress	added		oU pc ph 9r E s	Savage Opress	/sə'vɑʒ oʊ'prεs/	https://starwars.fandom.com/wiki/Savage_Opress	Surname component only; did not override common English savage.
+momin	added		m oU m I n	Darth Momin	/ˈmoʊˌmɪn/	https://starwars.fandom.com/wiki/Darth_Momin	Explicit Wookieepedia pronunciation.
+aayla	added		ei l ^	Aayla Secura	/'eɪlʌ sə'kʊrə/	https://starwars.fandom.com/wiki/Aayla_Secura	Given name component.
+secura	added		s @ kc kh U 9r @	Aayla Secura	/'eɪlʌ sə'kʊrə/	https://starwars.fandom.com/wiki/Aayla_Secura	Surname component.
+shaak	added		S A kc kh	Shaak Ti	/ʃɑk ti/	https://starwars.fandom.com/wiki/Shaak_Ti	Given name component.
+ti	added		tc th i:	Shaak Ti	/ʃɑk ti/	https://starwars.fandom.com/wiki/Shaak_Ti	Short name component.
+vizsla	added		v I z l A	Pre Vizsla / Tarre Vizsla	/'pri vizlɑ/ and /tär 'vɪzlə/	https://starwars.fandom.com/wiki/Pre_Vizsla/Legends	Clan/name component.
+nien	added		n i: @ n	Nien Nunb	/nēin nənbə/ or /nīn nəm/	https://starwars.fandom.com/wiki/Nien_Nunb	Kept first spelling-aligned variant for given name.
+nunb	added		n ^ m	Nien Nunb	/nēin nənbə/ or /nīn nəm/	https://starwars.fandom.com/wiki/Nien_Nunb	Kept shorter second variant for surname.
+ando	added		A n dc d oU	Ando Prime/Legends	/ɑndəʊ priːm/ or usual /ɑndəʊ praɪm/	https://starwars.fandom.com/wiki/Ando_Prime/Legends	Base component; prime already common.
+ando-prime	added		A n dc d oU pc ph 9r aI m	Ando Prime/Legends	usual /ɑndəʊ praɪm/	https://starwars.fandom.com/wiki/Ando_Prime/Legends	Hyphenated alias using usual English prime variant.
+lok	added		l A kc kh	Lok/Legends	/lɒk/	https://starwars.fandom.com/wiki/Lok/Legends	Explicit Wookieepedia pronunciation.
+sleemo	added		s l ei m oU	List of phrases and slang/Legends	slay-mo	https://starwars.fandom.com/wiki/List_of_phrases_and_slang/Legends	Huttese insult.
+tauntaun	added		tc th > n tc th > n	Tauntaun	/ˈtɔːn-tɔːn/	https://starwars.fandom.com/wiki/Tauntaun	Canon creature species pronunciation.
+tauntauns	added		tc th > n tc th > n z	Tauntaun	/ˈtɔːn-tɔːn/ + plural -s	https://starwars.fandom.com/wiki/Tauntaun	Plural alias.
+soresu	added		s > 9r i: s u	Form III	sor-EE-soo	https://starwars.fandom.com/wiki/Form_III	Lightsaber form pronunciation.
+ataru	added		@ tc th A 9r u	Form IV	uh-TAR-oo	https://starwars.fandom.com/wiki/Form_IV	Lightsaber form pronunciation.
+makashi	added		m @ kc kh A S aI	Form II	Muh-KAA-shye	https://starwars.fandom.com/wiki/Form_II	Lightsaber form pronunciation.
+aargau	added		A 9r gc g aU	Aargau/Legends	/är-'gou/	https://starwars.fandom.com/wiki/Aargau/Legends	Core Worlds banking planet.
+acklay	added		& kc kh l ei	Acklay/Legends	/Ăk'-lā/	https://starwars.fandom.com/wiki/Acklay/Legends	Arena creature pronunciation.
+acklays	added		& kc kh l ei z	Acklay/Legends	/Ăk'-lā/ + plural -s	https://starwars.fandom.com/wiki/Acklay/Legends	Plural alias.
+aiwha	added		aI w A	Aiwha/Legends	/Äē'-wä/	https://starwars.fandom.com/wiki/Aiwha/Legends	Kamino/Naboo creature pronunciation.
+aiwhas	added		aI w A z	Aiwha/Legends	/Äē'-wä/ + plural -s	https://starwars.fandom.com/wiki/Aiwha/Legends	Plural alias.
+hypori	added		h aI pc ph oU 9r i:	Hypori/Legends	/haɪ'poɹi/	https://starwars.fandom.com/wiki/Hypori/Legends	Clone Wars/Empire at War planet.
+kaggath	added		kc kh ^ gc g & T	Kaggath	/kʌˈɡæθ/	https://starwars.fandom.com/wiki/Kaggath	Ancient Sith rite.
+honoghr	added		h A n oU gc g 3r	Honoghr/Legends	/'hɑnoˌgɚ/	https://starwars.fandom.com/wiki/Honoghr/Legends	Noghri homeworld.
+noghri	added		n oU gc g 9r i:	Noghri/Legends	/'no.gɹi/	https://starwars.fandom.com/wiki/Noghri/Legends	Species name from Honoghr.
+muunilinst	added		m j u n I l I s tc th	Muunilinst/Legends	"""MYOON-il-ist"", silent n near the end"	https://starwars.fandom.com/wiki/Muunilinst/Legends	Banking Clan homeworld.
+vjun	added		v A dZc dZ ^ n	Vjun/Legends	VAH-JUHN; alternate VUHN	https://starwars.fandom.com/wiki/Vjun/Legends	Kept Jedi Academy pronunciation; alternate documented in source.
+vergere	added		v 3r Z I 9r	Vergere	/vɚ'ʒɪɹ/	https://starwars.fandom.com/wiki/Vergere	New Jedi Order character.
+caedus	added		kc kh aI dc d @ s	Darth Caedus	KIE-duss, rhyming with hide us	https://starwars.fandom.com/wiki/Darth_Caedus	Sith name pronunciation.
+thrawn	added		T 9r A n	Mitth'raw'nuruodo/Legends	/ˈθɹɑːn/	https://starwars.fandom.com/wiki/Mitth%27raw%27nuruodo/Legends	Core name pronunciation.
+galen	added		gc g ei l @ n	Galen Marek	/ɡeɪlən ˈmæɹɛk/	https://starwars.fandom.com/wiki/Galen_Marek	Given name component from source pronunciation.
+marek	added		m & 9r E kc kh	Galen Marek	/ɡeɪlən ˈmæɹɛk/	https://starwars.fandom.com/wiki/Galen_Marek	Surname component from source pronunciation.
+naboo	added		n @ bc b u	Naboo/Legends	/nə'bu/	https://starwars.fandom.com/wiki/Naboo/Legends	Prequel-era planet.
+felucia	added		f ^ l u S @	Felucia/Legends	/fʌ'luʃə/ or /fʌ'lusiə/	https://starwars.fandom.com/wiki/Felucia/Legends	Kept first listed Wookieepedia variant.
+felucian	added		f ^ l u S @ n	Felucia/Legends	derived from /fʌ'luʃə/ + -n	https://starwars.fandom.com/wiki/Felucia/Legends	Demonym/species-style derivative.

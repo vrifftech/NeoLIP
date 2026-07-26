@@ -1,0 +1,492 @@
+NON-COMMERCIAL SOFTWARE LICENSE AGREEMENT
+
+Background
+
+This software download includes three software packages: the CSLU Toolkit is
+owned by the Oregon Health & Science University ("OHSU"); CUAnimate is owned
+by the University of Colorado, Boulder; Festival is owned by the University of
+Edinburgh.  The licenses for each of these products are included below.  By
+clicking "I AGREE" you have agreed to the terms of each of the licenses.
+Please contact the individual institutions for commercial licenses.
+
+
+_________________________________________________________________________________
+
+OHSU CSLU Toolkit Non-commercial License Agreement
+
+Download license approved by OHSU's Technology & Research Collaborations
+office on Feb 10, 2004. Questions regarding this license agreement should be
+directed to:
+
+Technology and Research Collaborations, Oregon Health & Science University
+2525 SW First Avenue, Suite AD120
+Portland, Oregon 97201-4753
+www.ohsu.edu/tech-transfer
+Phone: 503-494-8200
+
+1. Background: Oregon Health & Science University’s Center for Spoken Language
+   Understanding at the Oregon Graduate Institute of Science and Technology
+   (the "Provider") developed the CSLU Toolkit (the "Software") and seeks to
+   distribute the Software for public use and benefit.
+
+2. Grant: The Provider hereby grants to you a revocable, nonexclusive,
+   nontransferable, royalty-free and worldwide license (the "License") to use
+   the Software solely for educational, research, or evaluation purposes, in
+   accordance with Paragraph 3 below and subject to the terms and conditions
+   of this License Agreement (the "Agreement"). The License entitles you to
+   use the Software to conduct research or education in spoken language
+   systems and to create Derivative Works solely for academic, non-commercial
+   research endeavors of the Licensee (A "Derivative Work" is a work that is a
+   modification of, enhancement to, derived from, or based upon the Software).
+
+3. Limitations on Use: The License is limited to noncommercial
+   use. Noncommercial use relates only to educational, research, personal or
+   evaluation purposes. Any other use is commercial use. You may not use the
+   Software in connection with any business activities. This license prohibits
+   any reverse engineering of the Software, except where source code is given.
+
+4. Limitations on Distribution: Licensee shall not grant sublicenses or
+   otherwise distribute the Licensed Software or Derivative Products to third
+   parties.
+
+5. Copies: You may copy Provider copyrighted material only as reasonably
+   necessary for your licensed use. You agree to reproduce the Provider's
+   copyright notice on all copies of the Provider copyrighted material.
+
+6. Ownership: The Software and the accompanying documentation are licensed,
+   not sold, to you. The Software is a proprietary product of the Provider and
+   is protected under U.S. copyright law and international treaty
+   revisions. The Provider retains all rights not specifically granted to you
+   hereunder, including ownership of the Software and all copyrights, trade
+   secrets, or other intellectual property rights in the Software and any
+   accompanying information.
+
+7. Publication Credit: You agree to acknowledge OHSU's Center for Spoken
+   Language Understanding with appropriate citations in any publication or
+   presentation containing research results obtained in whole or in part
+   through the use of the Software.
+
+8. Term of License: The License is effective upon receipt by you of the
+   Software and shall continue until terminated. The License will terminate
+   immediately without notice by the Provider if you fail to comply with the
+   terms and conditions of this Agreement. Upon termination of this License,
+   you shall immediately discontinue all use of the Software provided
+   hereunder, and return to the Provider or destroy the original and all
+   copies of all such Software. All of your obligations under this Agreement
+   shall survive the termination of the License.
+
+9. Warranty: THE PROVIDER MAKES NO REPRESENTATIONS ABOUT THE SUITABILITY, USE,
+   OR PERFORMANCE OF THIS SOFTWARE OR ABOUT ANY CONTENT OR INFORMATION MADE
+   ACCESSIBLE BY THE SOFTWARE, FOR ANY PURPOSE. THE SOFTWARE IS PROVIDED "AS
+   IS," WITHOUT EXPRESS OR IMPLIED WARRANTIES INCLUDING, BUT NOT LIMITED TO,
+   ANY IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+   PURPOSE, OR NONINFRINGEMENT WITH RESPECT TO THE SOFTWARE. THE PROVIDER IS
+   NOT OBLIGATED TO SUPPORT OR ISSUE UPDATES TO THE SOFTWARE.
+
+10. Limitation on Liability: This Software is provided free of charge and,
+    accordingly, the Provider shall not be liable under any theory for any
+    damages suffered by you or any user of the Software. UNDER NO
+    CIRCUMSTANCES SHALL PROVIDER BE LIABLE TO YOU OR ANY OTHER PERSON FOR ANY
+    DIRECT, INDIRECT, SPECIAL, INCIDENTAL, OR CONSEQUENTIAL DAMAGES OF ANY
+    CHARACTER INCLUDING, WITHOUT LIMITATION, DAMAGES FOR LOSS OF GOODWILL,
+    WORK STOPPAGE, COMPUTER FAILURE OR MALFUNCTION, OR ANY AND ALL OTHER
+    ECONOMIC LOSS OR COMMERCIAL DAMAGES ARISING OUT OF THE USE OR INABILITY TO
+    USE THIS SOFTWARE, EVEN IF PROVIDER SHALL HAVE BEEN INFORMED OF THE
+    POSSIBILITY OF SUCH DAMAGES, OR FOR ANY THIRD-PARTY CLAIMS.
+
+11. Indemnification: By clicking on the "I AGREE" button below, you agree to
+    hold harmless, indemnify, and defend the Provider, its Trustees, officers,
+    employees, and agents from and against any loss, damage, liability, claim
+    of loss, lawsuit, cause of action, or other claim asserted against them or
+    any of them arising out of, or in any way connected with, your performance
+    of any activity hereunder.
+
+12. U.S. Government Restricted Rights.  OHSU acknowledges that the Licensed
+    Software and Derivative Products may be subject to certain government
+    rights in computer software related to the federal government funding of
+    the development of such works, and that such rights may include a
+    royalty-free, non-exclusive license solely for governmental use (including
+    use by subcontractors). Use, duplication or disclosure by the Government
+    is subject to restrictions set forth as subparagraphs (a) through (d) of
+    the Commercial Computer--Restricted Rights clause at FAR 52.227-19, when
+    applicable, or in subparagraph (c)(1)(ii) of the Rights in Technical Data
+    and Computer Software clause at DFARS 252.227-7013, and in similar clauses
+    in the NASA FAR Supplement. Contractor/Manufacturer is the Oregon Graduate
+    Institute of Science & Technology, P.O. Box 91000, Portland, Oregon
+    97291-1000.
+
+13. Export Controls: By clicking on the "I AGREE" button below, you agree
+    that the Software will not be shipped, transferred, or exported into any
+    country or used in any manner prohibited by the United States Export
+    Administration Act or any other export laws, restrictions, or regulations.
+
+14. Disputes: The Parties agree to attempt to settle amicably any controversy
+    or claim arising under this Agreement or a breach of this Agreement.
+    Thereafter, both parties agree that all disputes between them arising out
+    of or relating to this Agreement, shall be submitted to non-binding
+    mediation unless the parties mutually agree otherwise.  All parties agree
+    to exercise their best effort in good faith to resolve all disputes in
+    mediation.  This Agreement shall be governed and construed in accordance
+    with the laws of the State of Oregon.
+
+15. Entire Agreement: This Agreement contains the entire agreement between the
+    parties with respect to the subject matter hereof, and it shall not be
+    modified or amended except by an instrument in writing signed by both
+    parties hereto.
+
+
+_________________________________________________________________________________
+
+                The Festival Speech Synthesis System Centre for Speech
+                Technology Research University of Edinburgh, UK Copyright (c)
+                1996-2003 All Rights Reserved.
+                                                                       
+  Permission is hereby granted, free of charge, to use and distribute this
+  software and its documentation without restriction, including without
+  limitation the rights to use, copy, modify, merge, publish, distribute,
+  sublicense, and/or sell copies of this work, and to permit persons to whom
+  this work is furnished to do so, subject to the following conditions: 1. The
+  code must retain the above copyright notice, this list of conditions and the
+  following disclaimer.  2. Any modifications must be clearly marked as such.
+  3. Original authors' names are not deleted.  4. The authors' names are not
+  used to endorse or promote products derived from this software without
+  specific prior written permission.
+                                  
+  THE UNIVERSITY OF EDINBURGH AND THE CONTRIBUTORS TO THIS WORK DISCLAIM ALL
+  WARRANTIES WITH REGARD TO THIS SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF
+  MERCHANTABILITY AND FITNESS, IN NO EVENT SHALL THE UNIVERSITY OF EDINBURGH
+  NOR THE CONTRIBUTORS BE LIABLE FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL
+  DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR
+  PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS
+  ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS
+  SOFTWARE.
+
+
+_________________________________________________________________________________
+
+NON-EXCLUSIVE SOFTWARE LICENSE AGREEMENT NON-COMMERCIAL
+
+        This Agreement is made and entered into by and between you (an
+        individual or a single entity) (hereinafter "Licensee") and the
+        Regents of the University Of Colorado, a body corporate, having its
+        principal office at 201 Regent Hall, Regent Drive, Boulder, CO 80309
+        through the Center for Spoken Language Research (hereinafter
+        "Colorado") .
+
+	WHEREAS, Colorado is the owner of certain Licensed Software (as
+	defined herein); and
+
+        WHEREAS, Licensee is interested using the Licensed Software and;
+        
+        WHEREAS, Colorado is willing to grant a license,
+        
+        NOW, THEREFORE, in consideration of the premises and the mutual
+        covenants contained herein, the parties hereto agree as follows:
+
+ARTICLE 1.  DEFINITIONS
+
+For the purposes of this Agreement, the following words and phrases shall have
+the following meanings:
+
+1.01 "Derivative Products" shall mean any computer program in machine readable
+  object code or source code form developed or otherwise acquired by Licensee
+  which is a modification of, enhancement to, derived from, or based upon the
+  Licensed Software including interactive books that are made using the
+  Licensed Software.
+
+1.02 "End User" shall mean parties that use the Licensed Software and
+  Derivative Products, as delivered to them, for their own purposes and not
+  for resale to others;
+
+1.03 "Effective Date" shall mean the date that the Licensed Software was
+  received by the Licensee.
+
+1.04 "Licensed Software" shall mean the computer programs described in
+  Appendix A attached hereto supplied to Licensee by Colorado pursuant to this
+  Agreement;
+
+ARTICLE 2.  GRANT OF RIGHTS AND ACCEPTANCE
+
+2.01 Colorado hereby grants, and Licensee hereby accepts, subject to the terms
+  and conditions of this Agreement, a non-exclusive, non-sublicensable,
+  non-transferable and non-assignable, (except as explicitly permitted herein)
+  license, to use and modify the Licensed Software and to create Derivative
+  Products solely for academic, non-commercial research endeavors of the
+  Licensee.
+
+2.02 Licensee may sublicense the Licensed Software to other academic
+  institutions for academic, non-commercial research endeavors of the
+  sublicensees under the terms of the license attached in Appendix B.
+
+2.02 Colorado acknowledges that the Licensed Software and Derivative Products
+  may be subject to certain government rights in computer software related to
+  the federal government funding of the development of such works, and that
+  such rights may include a royalty-free, non-exclusive license solely for
+  governmental use (including use by subcontractors).
+
+ARTICLE 3.  LICENSE EXCLUSIONS
+
+3.01 Licensee shall not grant sublicenses or otherwise distribute the Licensed
+  Software or Derivative Products to third parties.
+
+3.02 Except as expressly authorized herein, Licensee shall:
+
+(a) not copy or modify the Licensed Software; and
+
+(b) not delete copyright notices or the original authors’ names from the
+Licensed Software; and
+
+(c) clearly mark any modifications to the Licensed Software as such; and
+
+(c) not reverse compile or reverse assemble all or any portion of the Licensed
+Software; and
+
+(d) not disclose the results of Licensed Software performance benchmarks to
+any third party or the inclusion of the License Software in any publication or
+presentation without inclusion of proper citations to the Center for Spoken
+Language Research.
+
+3.03 No license, right or interest in any Colorado trademark, trade name or
+  service mark is granted hereunder.
+
+ARTICLE 4. TECHNICAL SUPPORT
+
+4.01 Licensee acknowledges that the Licensed Software is provided without any
+  obligation by CSLR to provide technical support or maintenance, telephone,
+  email or otherwise, including but not limited to modifications,
+  improvements, customizations, patches, bug fixes.  Licensee acknowledges
+  that it shall be solely responsible for any technical support.
+
+ARTICLE 5.  DISTRIBUTION OF DERIVATIVE PRODUCTS
+	
+5.01 Upon Licensee's written request, Colorado agrees to reasonably consider
+  distributing the Derivative Products.  Colorado agrees to review the
+  proposed distribution of the Derivative Products, taking into account the
+  current or proposed commercial status of the Licensed Software and any
+  Derivative Products as well as the purpose for distribution.  The parties
+  expressly acknowledge and agree that any such distribution shall be in the
+  sole discretion of Colorado, with terms to be solely determined by Colorado.
+
+5.02 Derivative Products that include Licensed Software may not be distributed
+  for commercial use without executing a separate license agreement for
+  commercial use with Colorado.
+
+
+ARTICLE 6.  TITLE AND PROTECTION
+
+6.01 Colorado retains title to all portions of the Licensed Software, and any
+  copies thereof. The Licensed Software contains valuable proprietary
+  information, and Licensee shall not disclose the Licensed Software to anyone
+  other than those of its employees or consultants under nondisclosure
+  obligations, having a need to know for purposes consistent with this
+  Agreement. The obligations set forth in this paragraph shall survive
+  termination of this Agreement.
+
+ARTICLE 7.  REPORTS AND AUDITS
+
+7.01 Upon the request of Colorado, with reasonable notice, but not more
+  frequently than once a year, Licensee shall permit Colorado to have access
+  during regular business hours to such records as may be necessary to verify
+  that Licensee has complied with the terms of this Agreement.
+
+7.02 Licensee acknowledges that Colorado is subject to the Colorado Public
+  Records Act (C.R.S. §§ 24-72-201 et seq.).  All plans and reports marked
+  "confidential" shall be treated by Colorado as confidential to the extent
+  permitted under § 24-72-204.
+
+7.03 Licensee shall exercise reasonable care to protect the confidential
+  information related to the Licensed Software from disclosure to third
+  parties; and no such disclosure shall be made without Colorado’s written
+  permission.  All written documents containing confidential information and
+  other material in tangible form received by Licensee under this Agreement
+  shall remain the property of Colorado, and such documents and materials,
+  together with copies of excerpts thereof, shall promptly be returned to
+  Colorado upon request, except one copy may be retained for archival
+  purposes.
+
+ARTICLE 8.  WARRANTIES, INDEMNIFICATIONS AND INSURANCE
+
+8.01 COLORADO MAKES NO REPRESENTATIONS, EXTENDS NO WARRANTIES OF ANY KIND,
+  EITHER EXPRESS OR IMPLIED, AND ASSUMES NO RESPONSIBILITIES WHATSOEVER WITH
+  RESPECT TO USE BY LICENSEE, OF LICENSED SOFTWARE OR DERIVATIVE PRODUCTS.
+  THERE ARE NO EXPRESS OR IMPLIED WARRANTIES OF MERCHANTABILITY OR FITNESS FOR
+  A PARTICULAR PURPOSE, NOR WARRANTIES THAT THE USE OR SALE OF SUCH LICENSED
+  SOFTWARE WILL NOT INFRINGE ANY PATENT, COPYRIGHT, TRADEMARK, SERVICE MARK,
+  OR OTHER RIGHTS.
+
+8.02 Licensee agrees to accept delivery of the Licensed Software in "as-is"
+  condition.
+
+8.03 Notwithstanding anything in this Agreement to the contrary, nothing in
+  this Agreement shall be construed as:
+
+(a) A warranty or representation that the Licensed Software or anything made,
+used, sold or otherwise disposed of under the License will or will not
+infringe patents, copyrights or other rights of third parties; or
+
+(b) An obligation to furnish any know-how or technology not provided in the
+Licensed Software, to bring or prosecute actions or suits against third
+parties for copyright infringement or to provide any services other than those
+specified in this Agreement.
+
+8.04 Licensee shall, to the extent permitted by law, indemnify, defend, and
+  hold Colorado, its regents, employees, students, officers, agents,
+  affiliates, and representatives harmless from and against all liability,
+  demands, damages, losses, and expenses (including attorney fees), for death,
+  personal injury, illness, property damage, noncompliance with applicable
+  laws and any other claim, proceeding, demand, expense and liability of any
+  kind whatsoever in connection with or arising out of:
+
+(a) the use by or on behalf of Licensee, affiliates, directors, officers, or
+employees of any Licensed Software or Derivative Products; or
+
+(b) the design, manufacture, production, of any Licensed Software or
+Derivative Product by Licensee; or
+
+(c) any right or obligation of Licensee under this Agreement.
+
+ARTICLE 9.  TERMINATION
+
+9.01 Licensee may terminate this Agreement at any time on sixty (60) days
+  written notice to Colorado if Licensee:
+
+(a) returns all confidential materials provided to Licensee by Colorado in
+connection with this Agreement; and
+
+(b) suspends its use of the Licensed Software and Derivative Products; and
+
+(c) provides Colorado the right to access any regulatory information filed
+with any U.S. or foreign government agency with respect to Licensed Software
+and Derivative Products; and
+
+9.02 Colorado may terminate this Agreement in the event that Licensee is in
+  breach or default of this Agreement and Licensee fails to cure the breach or
+  default within thirty (30) days of written notice of the breach or default.
+
+ARTICLE 10.  MISCELLANEOUS
+
+10.01 This Agreement shall be binding upon and inure to the benefit of the
+   respective successors and assigns of the parties hereto.  However, Licensee
+   may not assign its rights in this Agreement without prior written approval
+   by Colorado, such approval not to be unreasonably withheld.
+
+10.02 This Agreement shall be governed by and construed in accordance with the
+   laws of the State of Colorado.
+
+10.03 Notice hereunder shall be deemed sufficient if given by registered mail,
+   postage prepaid, and addressed to the party to receive such notice at the
+   address given below, or such other address as may hereafter be designated
+   by notice in writing.
+
+
+        Colorado: Licensee: Office of Technology Transfer University of
+        Colorado Suite 390C, 4001 Discovery Drive Campus Box 589 UCB Boulder,
+        CO 80309-0589
+        												
+10.04 Licensee agrees not to identify Colorado in any promotional advertising,
+   press releases, sales literature or other promotional materials to be
+   disseminated to the public or any portion thereof without Colorado prior
+   written consent in each case, except that Licensee may state that it has a
+   license for the Licensed Software from Colorado. Licensee further agrees
+   not to use the name of Colorado or any Colorado faculty member, inventor,
+   employee or student or any trademark, service mark, trade name, copyright
+   or symbol of Colorado, without the prior written consent of the Colorado,
+   entity or person whose name is sought to be used.
+
+10.05 Licensee agrees to:
+
+(a) comply with all laws and regulations of the United States and any other
+country as appropriate concerning or controlling the import or export of the
+Licensed Software and Derivative Products, data, laboratory prototypes or
+other commodities.  Colorado makes no representation that a license or consent
+for export will not be required by applicable governmental agencies, or if
+required, that it will be issued.
+
+(b) comply with all copyright laws and regulations of the United States and
+any other country as appropriate concerning the use of copyrighted materials
+in Derivative Products.
+
+(c) comply with all applicable statutes, regulations, and guidelines,
+including applicable governmental regulations, policies and guidelines in its
+use of any Colorado - supplied materials.  Licensee agrees not to use the
+materials for research involving human subjects or clinical trials in the
+United States without complying with 21 C.F.R. Part 50 and 45 C.F.R. Part 46
+(as those regulations may be amended from time to time).
+
+10.06 The terms and provisions contained in this Agreement constitute the
+   entire Agreement between the parties and shall supersede all previous
+   communications, representations, agreements or understandings, either oral
+   or written, between the parties hereto with respect to the subject matter
+   hereof, and no agreement or understanding varying or extending this
+   Agreement will be binding upon either party hereto, unless in writing which
+   specifically refers to this Agreement, signed by duly authorized officers
+   or representatives of the respective parties, and the provisions of this
+   Agreement not specifically amended thereby shall remain in full force and
+   effect according to their terms.
+
+10.07 The provisions of this Agreement are severable, and in the event that
+   any provision of this Agreement is determined to be invalid or
+   unenforceable under any controlling body of the law, such invalidity or
+   unenforceability will not in any way affect the validity or enforceability
+   of the remaining provisions hereof.
+
+10.08 This Agreement does not establish a joint venture, agency or partnership
+   between the parties, nor create an employer - employee relationship.
+
+10.09 The parties agree that nothing in this Agreement is intended or shall be
+   construed as a waiver, either express or implied, of any of the immunities,
+   rights, benefits, defenses or protections provided to Colorado under
+   governmental or sovereign immunity laws from time to time applicable to
+   Colorado, including, without limitation, the Colorado Governmental Immunity
+   Act (C.R.S. §§ 24-10-101, et seq.) and the Eleventh Amendment to the United
+   States Constitution.
+
+10.10 The provisions of Articles 4, 6 and 9, and Paragraphs 8.01, 10.02,
+   10.04, 10.06-10.07, and 10.09, and any other provision of this Agreement
+   that by its nature is intended to survive, shall survive any termination or
+   expiration of this Agreement.
+
+
+	IN WITNESS WHEREOF the parties hereto have caused this Agreement to be
+	effective on the date that the Licensed Software was received by the
+	Licensee.
+
+
+
+APPENDIX A
+
+LICENSED SOFTWARE
+
+CU Animate: CSLR has developed a powerful set of tools, called CU Animate, for
+researching and developing animated characters and controlling them in real
+time within advanced dialogue systems.  CU animate is designed to support
+development and manipulation of 3D models, importation of 3D models from major
+commercial packages, stereo video data collection for texture mapping, and
+real-time animation using both parameter-based and morphing approaches. A set
+of tools has been developed to enable authors to produce arbitrary animation
+sequences for a library of five 3D characters, and to incorporate these
+sequences into advanced dialogue systems such as electronic books.
+
+CU Animate currently uses five characters that are available to licensees and
+industrial affiliates, and we will work with affiliates to develop and animate
+new 3D models. Each of the five characters is equipped with a skeleton so that
+movements of arms, hands, fingers, legs, feet, etc can be manipulated; a
+tongue that moves to specified targets for each phoneme, and lips that move to
+specified viseme targets in real time.  In addition, each character is
+designed to express five or six different emotions. A real time rendering
+engine animates the models at over 30 frames per second on off-the-shelf
+computers. The rendering engine produces visible speech and tongue movements
+by morphing between specified targets between adjacent phonemes. Smoothing is
+done over left and right contexts to provide a rough first approximation to
+coarticulation. A few heuristics have been incorporated into the rendering
+scheme to improve the visible speech; e.g., a rule requires targets to be
+reached at the onsets of stop consonants; this rule overcomes effects of
+smoothing that prevented the target from being reached at faster speech rates.
+
+The characters and animation system have been designed for maximum flexibility
+and control.  The polygons associated with each eye, eyeball and eyebrow can
+be controlled independently, as can head movements, body movements, and
+gestures that combine movements of different body parts.
+
+
+_________________________________________________________________________________

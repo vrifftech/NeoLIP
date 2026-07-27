@@ -306,54 +306,55 @@ int anticipationMsForShape(std::uint8_t shape, const LipQualityOptions& post) {
     }
 }
 
-int kotorStockPositionMs(std::uint32_t pos) {
-    const double seconds = kotorStockPosToTime(pos);
+int lipTimeMs(double seconds) {
     if (!std::isfinite(seconds)) return 0;
     return static_cast<int>(std::llround(seconds * 1000.0));
 }
 
-void addVisibleEntry(std::vector<KotorStockKeyframe>& entries, int timeMs, std::uint8_t shape) {
+void addVisibleEntry(std::vector<KotorVisibleKeyframe>& entries, int timeMs,
+                     std::uint8_t shape) {
     if (timeMs < 0) timeMs = 0;
     if (shape > 15) shape = 15;
-    const std::uint32_t pos = floatToU32Bits(static_cast<float>(static_cast<double>(timeMs) / 1000.0));
+    const double timeSeconds = static_cast<double>(timeMs) / 1000.0;
     if (!entries.empty()) {
-        if (entries.back().position == pos) {
+        if (entries.back().timeSeconds == timeSeconds) {
             entries.back().shape = shape;
             return;
         }
         if (entries.back().shape == shape) return;
     }
-    entries.push_back({pos, shape});
+    entries.push_back({timeSeconds, shape});
 }
 
-std::vector<KotorStockKeyframe> smoothVisibleEntries(std::vector<KotorStockKeyframe> entries, const LipQualityOptions& post) {
+std::vector<KotorVisibleKeyframe> smoothVisibleEntries(
+    std::vector<KotorVisibleKeyframe> entries, const LipQualityOptions& post) {
     if (entries.empty()) return entries;
-    std::sort(entries.begin(), entries.end(), [](const KotorStockKeyframe& a, const KotorStockKeyframe& b) {
-        return a.position < b.position;
+    std::sort(entries.begin(), entries.end(), [](const KotorVisibleKeyframe& a,
+                                                  const KotorVisibleKeyframe& b) {
+        return a.timeSeconds < b.timeSeconds;
     });
 
-    // Collapse duplicate positions and adjacent duplicate shapes first.
-    std::vector<KotorStockKeyframe> compact;
-    for (auto e : entries) {
-        if (e.shape > 15) e.shape = 15;
-        if (!compact.empty() && compact.back().position == e.position) {
-            compact.back() = e;
-        } else if (!compact.empty() && compact.back().shape == e.shape) {
+    std::vector<KotorVisibleKeyframe> compact;
+    for (auto entry : entries) {
+        if (entry.shape > 15) entry.shape = 15;
+        if (!compact.empty() && compact.back().timeSeconds == entry.timeSeconds) {
+            compact.back() = entry;
+        } else if (!compact.empty() && compact.back().shape == entry.shape) {
             continue;
         } else {
-            compact.push_back(e);
+            compact.push_back(entry);
         }
     }
     if (post.minKeyMs <= 0 || compact.size() <= 2) return compact;
 
-    std::vector<KotorStockKeyframe> out;
+    std::vector<KotorVisibleKeyframe> out;
     out.reserve(compact.size());
     out.push_back(compact.front());
     for (std::size_t i = 1; i < compact.size(); ++i) {
-        const KotorStockKeyframe& cur = compact[i];
-        KotorStockKeyframe& prev = out.back();
-        const int curMs = kotorStockPositionMs(cur.position);
-        const int prevMs = kotorStockPositionMs(prev.position);
+        const KotorVisibleKeyframe& cur = compact[i];
+        KotorVisibleKeyframe& prev = out.back();
+        const int curMs = lipTimeMs(cur.timeSeconds);
+        const int prevMs = lipTimeMs(prev.timeSeconds);
         const int gap = curMs - prevMs;
         if (gap >= post.minKeyMs || cur.shape == 0) {
             if (prev.shape != cur.shape) out.push_back(cur);
@@ -363,41 +364,37 @@ std::vector<KotorStockKeyframe> smoothVisibleEntries(std::vector<KotorStockKeyfr
         const bool curPreserved = post.preserveClosures && isPreservedClosureShape(cur.shape);
         const bool prevPreserved = post.preserveClosures && isPreservedClosureShape(prev.shape);
         if (curPreserved) {
-            // Keep visible closures/fricatives even when short. If the previous
-            // non-closure was too close, replace it with the closure; otherwise
-            // add the closure as its own key.
             if (!prevPreserved && prev.shape != 0 && out.size() > 1) {
                 prev = cur;
             } else if (prev.shape != cur.shape) {
                 out.push_back(cur);
             }
         } else if (prevPreserved) {
-            // Preserve the previous closure by dropping this too-near release.
             continue;
         } else {
-            // For non-critical shapes, prefer the later shape when the two keys
-            // are too close; this removes flicker without extending stale vowels.
             prev = cur;
         }
     }
 
-    std::vector<KotorStockKeyframe> finalEntries;
-    for (const auto& e : out) {
-        if (!finalEntries.empty() && finalEntries.back().shape == e.shape) continue;
-        finalEntries.push_back(e);
+    std::vector<KotorVisibleKeyframe> finalEntries;
+    for (const auto& entry : out) {
+        if (!finalEntries.empty() && finalEntries.back().shape == entry.shape) continue;
+        finalEntries.push_back(entry);
     }
     return finalEntries;
 }
 
-KotorStockLip phnToKotorVisibleEntries(const PhnFile& phn, const LipQualityOptions& post) {
-    KotorStockLip out;
+std::vector<KotorVisibleKeyframe> phnToKotorVisibleEntries(
+    const PhnFile& phn, const LipQualityOptions& post) {
+    std::vector<KotorVisibleKeyframe> out;
     std::int16_t lastMouth = -1;
     int lastStartTime = -1;
     for (const auto& iv : phn.intervals) {
         std::int16_t mouth = csluPhoneToKotorShapeOrSkip(iv.label);
         if (mouth == -1) {
-            if (post.closeOnPause && isRestOrPausePhone(iv.label) && (iv.endMs - iv.startMs) >= post.closeOnPauseMs) {
-                addVisibleEntry(out.entries, iv.startMs, 0);
+            if (post.closeOnPause && isRestOrPausePhone(iv.label) &&
+                (iv.endMs - iv.startMs) >= post.closeOnPauseMs) {
+                addVisibleEntry(out, iv.startMs, 0);
                 lastMouth = 0;
             }
             continue;
@@ -405,17 +402,16 @@ KotorStockLip phnToKotorVisibleEntries(const PhnFile& phn, const LipQualityOptio
         int start = iv.startMs;
         if (lastMouth == 16) start = lastStartTime;
         lastMouth = mouth;
-        if (lastMouth == 16) { lastStartTime = iv.startMs; continue; }
+        if (lastMouth == 16) {
+            lastStartTime = iv.startMs;
+            continue;
+        }
         const std::uint8_t shape = static_cast<std::uint8_t>(lastMouth);
         start = std::max(0, start - anticipationMsForShape(shape, post));
-        addVisibleEntry(out.entries, start, shape);
+        addVisibleEntry(out, start, shape);
     }
-    out.entries = smoothVisibleEntries(std::move(out.entries), post);
-    if (out.entries.empty()) out.entries.push_back({floatToU32Bits(0.0f), 0});
-    out.durationPosition = out.entries.back().position;
-    return out;
+    return smoothVisibleEntries(std::move(out), post);
 }
-
 
 } // namespace
 
@@ -515,31 +511,69 @@ std::uint32_t kotorStockFloatToPos(float f) { return floatToU32Bits(f); }
 LipFile readLip(const std::filesystem::path& path) {
     std::ifstream in(path, std::ios::binary);
     if (!in) throw std::runtime_error("cannot open LIP file: " + path.string());
-    std::vector<unsigned char> data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    std::vector<unsigned char> data((std::istreambuf_iterator<char>(in)),
+                                    std::istreambuf_iterator<char>());
     if (data.size() < 16) throw std::runtime_error("LIP file too short: " + path.string());
-    if (std::memcmp(data.data(), "LIP V1.0", 8) != 0) throw std::runtime_error("invalid LIP signature: " + path.string());
+    if (std::memcmp(data.data(), "LIP V1.0", 8) != 0) {
+        throw std::runtime_error("invalid LIP signature: " + path.string());
+    }
+
     LipFile lip;
     lip.durationSeconds = readF32LE(data.data() + 8);
-    const std::uint32_t n = readU32LE(data.data() + 12);
-    const std::uint64_t need = 16ull + 5ull * n;
-    if (data.size() < need) throw std::runtime_error("truncated LIP keyframe table: " + path.string());
-    lip.frames.reserve(n);
-    const unsigned char* p = data.data() + 16;
-    for (std::uint32_t i = 0; i < n; ++i, p += 5) {
-        lip.frames.push_back({readF32LE(p), p[4]});
+    const std::uint32_t recordCount = readU32LE(data.data() + 12);
+    if (recordCount == 0) {
+        throw std::runtime_error("LIP record count is zero: " + path.string());
+    }
+    if (recordCount > (data.size() - 16U) / 5U) {
+        throw std::runtime_error("truncated LIP record table: " + path.string());
+    }
+    const std::size_t expectedSize =
+        16U + 5U * static_cast<std::size_t>(recordCount);
+    if (data.size() != expectedSize) {
+        throw std::runtime_error(
+            "LIP file size does not match its uint32 record count: " + path.string());
+    }
+
+    lip.frames.reserve(recordCount);
+    const unsigned char* record = data.data() + 16;
+    for (std::uint32_t i = 0; i < recordCount; ++i, record += 5) {
+        lip.frames.push_back({readF32LE(record), record[4]});
     }
     return lip;
 }
 
-void writeLipRuntimeLayout(const std::filesystem::path& path, const LipFile& lip) {
-    if (lip.frames.size() > 0xffffffffull) throw std::runtime_error("too many LIP keyframes");
+void writeLip(const std::filesystem::path& path, const LipFile& lip) {
+    if (lip.frames.empty()) throw std::runtime_error("LIP requires at least one record");
+    if (lip.frames.size() > 0xffffffffull) throw std::runtime_error("too many LIP records");
+    if (!(lip.durationSeconds > 0.0f) || !std::isfinite(lip.durationSeconds)) {
+        throw std::runtime_error("LIP duration must be positive and finite");
+    }
+    if (lip.frames.front().timeSeconds != 0.0f || lip.frames.front().shape != 0) {
+        throw std::runtime_error("LIP first record must be time 0.0 with shape 0");
+    }
+    for (std::size_t i = 0; i < lip.frames.size(); ++i) {
+        const LipKeyframe& frame = lip.frames[i];
+        if (!std::isfinite(frame.timeSeconds) || frame.timeSeconds < 0.0f) {
+            throw std::runtime_error("LIP record times must be finite and non-negative");
+        }
+        if (frame.shape > 15) {
+            throw std::runtime_error("LIP shape ids must be in the range 0..15");
+        }
+        if (i > 0 && frame.timeSeconds < lip.frames[i - 1].timeSeconds) {
+            throw std::runtime_error("LIP record times must be monotonic");
+        }
+    }
+    if (lip.frames.back().timeSeconds != lip.durationSeconds) {
+        throw std::runtime_error("LIP duration must equal the final record time");
+    }
+
     std::ostringstream out(std::ios::out | std::ios::binary);
     out.write("LIP V1.0", 8);
     writeF32LE(out, lip.durationSeconds);
     writeU32LE(out, static_cast<std::uint32_t>(lip.frames.size()));
-    for (const auto& k : lip.frames) {
-        writeF32LE(out, k.timeSeconds);
-        out.put(static_cast<char>(k.shape));
+    for (const auto& record : lip.frames) {
+        writeF32LE(out, record.timeSeconds);
+        out.put(static_cast<char>(record.shape));
     }
     if (!out) throw std::runtime_error("failed serializing LIP file: " + path.string());
     writeLipBytesAtomically(path, out.str());
@@ -556,74 +590,41 @@ LipValidation validateLipForKotorRuntime(const LipFile& lip, std::uintmax_t file
         if (fileSize != expected) warn("file size is not exactly 16 + 5*entry_count");
     }
     const float firstNorm = lip.frames.front().timeSeconds / lip.durationSeconds;
-    if (!(firstNorm == 0.0f)) error("first keyframe time must normalize to exactly 0.0");
+    if (!(firstNorm == 0.0f)) error("first record time must normalize to exactly 0.0");
+    if (lip.frames.front().shape != 0) error("first record shape must be the rest shape 0");
     const float lastNorm = lip.frames.back().timeSeconds / lip.durationSeconds;
-    if (!(lastNorm < 1.000010014f && lastNorm > 0.999989986f)) warn("last keyframe does not normalize to approximately 1.0");
+    if (!(lastNorm < 1.000010014f && lastNorm > 0.999989986f)) warn("last record does not normalize to approximately 1.0");
     for (std::size_t i = 0; i < lip.frames.size(); ++i) {
         const auto& k = lip.frames[i];
-        if (!std::isfinite(k.timeSeconds)) error("non-finite keyframe time at index " + std::to_string(i));
-        if (i > 0 && k.timeSeconds < lip.frames[i-1].timeSeconds) warn("non-monotonic keyframe time at index " + std::to_string(i));
+        if (!std::isfinite(k.timeSeconds)) error("non-finite record time at index " + std::to_string(i));
+        if (i > 0 && k.timeSeconds < lip.frames[i-1].timeSeconds) warn("non-monotonic record time at index " + std::to_string(i));
         if (k.shape > 15) warn("shape id outside safe 0..15 at index " + std::to_string(i));
     }
     return v;
 }
 
-KotorStockLip readKotorStockLip(const std::filesystem::path& path) {
-    std::ifstream in(path, std::ios::binary);
-    if (!in) throw std::runtime_error("cannot open LIP file: " + path.string());
-    std::vector<unsigned char> data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    if (data.size() < 21) throw std::runtime_error("stock LIP file too short: " + path.string());
-    if (std::memcmp(data.data(), "LIP V1.0", 8) != 0) throw std::runtime_error("invalid LIP signature: " + path.string());
-    KotorStockLip lip;
-    lip.durationPosition = readU32LE(data.data() + 8);
-    const std::uint8_t countPlusOne = data[12];
-    if (countPlusOne == 0) throw std::runtime_error("stock LIP count byte is zero/overflowed: " + path.string());
-    const std::size_t n = static_cast<std::size_t>(countPlusOne - 1);
-    const std::size_t need = 21 + 5 * n;
-    if (data.size() < need) throw std::runtime_error("truncated stock LIP entries: " + path.string());
-    const unsigned char* p = data.data() + 21;
-    lip.entries.reserve(n);
-    for (std::size_t i = 0; i < n; ++i, p += 5) lip.entries.push_back({readU32LE(p), p[4]});
-    return lip;
-}
-
-void writeKotorStockLip(const std::filesystem::path& path, const KotorStockLip& lip) {
-    if (lip.entries.empty()) throw std::runtime_error("stock LIP requires at least one visible entry");
-    if (lip.entries.size() + 1 > 255) throw std::runtime_error("stock LIP count byte would overflow");
-    std::ostringstream out(std::ios::out | std::ios::binary);
-    out.write("LIP V1.0", 8);
-    writeU32LE(out, lip.durationPosition);
-    out.put(static_cast<char>(static_cast<std::uint8_t>(lip.entries.size() + 1)));
-    for (int i = 0; i < 8; ++i) out.put('\0');
-    for (const auto& k : lip.entries) {
-        writeU32LE(out, k.position);
-        out.put(static_cast<char>(k.shape));
-    }
-    if (!out) throw std::runtime_error("failed serializing stock LIP file: " + path.string());
-    writeLipBytesAtomically(path, out.str());
-}
-
-LipFile kotorStockRuntimeView(const KotorStockLip& lip) {
-    LipFile out;
-    out.durationSeconds = u32BitsToFloat(lip.durationPosition);
-    out.frames.reserve(lip.entries.size() + 1);
-    out.frames.push_back({0.0f, 0});
-    for (const auto& e : lip.entries) out.frames.push_back({u32BitsToFloat(e.position), e.shape});
-    return out;
-}
-
 std::vector<KotorVisibleKeyframe> readKotorVisibleKeyframes(
     const std::filesystem::path& path, double* durationSeconds) {
-    const KotorStockLip stock = readKotorStockLip(path);
-    const double duration = kotorStockPosToTime(stock.durationPosition);
-    if (durationSeconds != nullptr) *durationSeconds = duration;
+    const LipFile lip = readLip(path);
+    if (lip.frames.front().timeSeconds != 0.0f || lip.frames.front().shape != 0) {
+        throw std::runtime_error(
+            "LIP first record is not the required time 0.0, shape 0 rest record: " +
+            path.string());
+    }
+    if (durationSeconds != nullptr) {
+        *durationSeconds = static_cast<double>(lip.durationSeconds);
+    }
 
     std::vector<KotorVisibleKeyframe> entries;
-    entries.reserve(stock.entries.size());
-    for (const auto& entry : stock.entries) {
-        entries.push_back({kotorStockPosToTime(entry.position), entry.shape});
+    entries.reserve(lip.frames.size() - 1U);
+    for (std::size_t i = 1; i < lip.frames.size(); ++i) {
+        entries.push_back(
+            {static_cast<double>(lip.frames[i].timeSeconds), lip.frames[i].shape});
     }
-    if (entries.empty()) entries.push_back({duration > 0.0 ? duration : 0.125, 0});
+    if (entries.empty()) {
+        const double duration = static_cast<double>(lip.durationSeconds);
+        entries.push_back({duration > 0.0 ? duration : 0.125, 0});
+    }
     return entries;
 }
 
@@ -654,13 +655,18 @@ void normalizeKotorVisibleKeyframes(std::vector<KotorVisibleKeyframe>& entries) 
 void writeKotorVisibleKeyframes(const std::filesystem::path& path,
                                 std::vector<KotorVisibleKeyframe> entries) {
     normalizeKotorVisibleKeyframes(entries);
-    KotorStockLip stock;
-    stock.entries.reserve(entries.size());
-    for (const auto& entry : entries) {
-        stock.entries.push_back({kotorStockTimeToPos(entry.timeSeconds), entry.shape});
+    if (entries.size() > 0xfffffffeull) {
+        throw std::runtime_error("too many visible LIP keyframes");
     }
-    stock.durationPosition = stock.entries.back().position;
-    writeKotorStockLip(path, stock);
+
+    LipFile lip;
+    lip.durationSeconds = static_cast<float>(entries.back().timeSeconds);
+    lip.frames.reserve(entries.size() + 1U);
+    lip.frames.push_back({0.0f, 0});
+    for (const auto& entry : entries) {
+        lip.frames.push_back({static_cast<float>(entry.timeSeconds), entry.shape});
+    }
+    writeLip(path, lip);
 }
 
 std::int16_t csluPhoneToKotorShapeOrSkip(const std::string& phoneIn) {
@@ -686,26 +692,30 @@ std::uint8_t csluPhoneToKotorShape(const std::string& phone) {
     return 0;
 }
 
-KotorStockLip phnToKotorStockLip(const PhnFile& phn, LipTailRestOptions tailRest, LipQualityOptions post) {
-    KotorStockLip out = phnToKotorVisibleEntries(phn, post);
+void writePhnAsLip(const std::filesystem::path& path, const PhnFile& phn,
+                   LipTailRestOptions tailRest, LipQualityOptions post) {
+    std::vector<KotorVisibleKeyframe> entries = phnToKotorVisibleEntries(phn, post);
     int durationMs = 125;
     if (!phn.intervals.empty()) durationMs = std::max(0, phn.intervals.back().endMs);
     durationMs += resolveTailRestMs(durationMs, tailRest);
-    const std::uint32_t finalPos = floatToU32Bits(static_cast<float>(static_cast<double>(durationMs) / 1000.0));
+    const double finalTimeSeconds = static_cast<double>(durationMs) / 1000.0;
 
-    if (out.entries.empty()) {
-        out.entries.push_back({finalPos, 0});
-    } else if (out.entries.back().position == finalPos) {
-        out.entries.back().shape = 0;
+    if (entries.empty()) {
+        entries.push_back({finalTimeSeconds, 0});
+    } else if (entries.back().timeSeconds == finalTimeSeconds) {
+        entries.back().shape = 0;
     } else {
-        out.entries.push_back({finalPos, 0});
+        entries.push_back({finalTimeSeconds, 0});
     }
-    out.durationPosition = finalPos;
-    return out;
-}
 
-void writePhnAsLip(const std::filesystem::path& path, const PhnFile& phn, LipTailRestOptions tailRest, LipQualityOptions post) {
-    writeKotorStockLip(path, phnToKotorStockLip(phn, tailRest, post));
+    LipFile lip;
+    lip.durationSeconds = static_cast<float>(finalTimeSeconds);
+    lip.frames.reserve(entries.size() + 1U);
+    lip.frames.push_back({0.0f, 0});
+    for (const auto& entry : entries) {
+        lip.frames.push_back({static_cast<float>(entry.timeSeconds), entry.shape});
+    }
+    writeLip(path, lip);
 }
 
 } // namespace cslu

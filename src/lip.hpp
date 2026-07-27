@@ -19,18 +19,9 @@ struct LipFile {
     std::vector<LipKeyframe> frames;
 };
 
-struct KotorStockKeyframe {
-    std::uint32_t position = 0;
-    std::uint8_t shape = 0;
-};
-
-struct KotorStockLip {
-    std::uint32_t durationPosition = 0;
-    std::vector<KotorStockKeyframe> entries;
-};
-
-// Editor-facing view of the visible stock LIP entries. The implicit runtime
-// zero/rest frame and stock byte layout stay inside the core implementation.
+// Editor-facing view of the records after the explicit leading time-0/rest
+// record required by KotOR LIP files. The canonical reader and writer use a
+// uint32 total record count at offset 0x0C and begin records at offset 0x10.
 struct KotorVisibleKeyframe {
     double timeSeconds = 0.0;
     std::uint8_t shape = 0;
@@ -80,7 +71,7 @@ const std::vector<LipShapeInfo>& kotorLipShapes();
 const char* kotorLipShapeName(std::uint8_t shape);
 
 LipFile readLip(const std::filesystem::path& path);
-void writeLipRuntimeLayout(const std::filesystem::path& path, const LipFile& lip);
+void writeLip(const std::filesystem::path& path, const LipFile& lip);
 LipValidation validateLipForKotorRuntime(const LipFile& lip, std::uintmax_t fileSize = 0);
 
 std::uint32_t kotorStockTimeToPos(double seconds);
@@ -88,15 +79,11 @@ double kotorStockPosToTime(std::uint32_t position);
 float kotorStockPosToFloat(std::uint32_t position);
 std::uint32_t kotorStockFloatToPos(float f);
 
-KotorStockLip readKotorStockLip(const std::filesystem::path& path);
-void writeKotorStockLip(const std::filesystem::path& path, const KotorStockLip& lip);
-LipFile kotorStockRuntimeView(const KotorStockLip& lip);
 std::vector<KotorVisibleKeyframe> readKotorVisibleKeyframes(
     const std::filesystem::path& path, double* durationSeconds = nullptr);
 void normalizeKotorVisibleKeyframes(std::vector<KotorVisibleKeyframe>& entries);
 void writeKotorVisibleKeyframes(const std::filesystem::path& path,
                                 std::vector<KotorVisibleKeyframe> entries);
-KotorStockLip phnToKotorStockLip(const PhnFile& phn, LipTailRestOptions tailRest = {}, LipQualityOptions quality = {});
 
 std::uint8_t csluPhoneToKotorShape(const std::string& phone);
 std::int16_t csluPhoneToKotorShapeOrSkip(const std::string& phone);

@@ -40,6 +40,7 @@
 #include <memory>
 #include <set>
 #include <sstream>
+#include <string>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -129,6 +130,37 @@ wxString JoinCommand(const wxArrayString& args) {
         command += QuoteArg(arg);
     }
     return command;
+}
+
+// NEOLIP_WXEXECUTE_ARGV_COMPAT_V1
+// wxWidgets 3.2 exposes wxExecute() overloads for null-terminated argv
+// arrays, but not the wxArrayString overload added by newer releases. Keep
+// process launches shell-free and Unicode-safe by adapting wxArrayString to
+// the wide-character argv overload available on both 3.2 and 3.3.
+class ExecuteArguments final {
+public:
+    explicit ExecuteArguments(const wxArrayString& args) {
+        storage_.reserve(args.size());
+        for (const wxString& arg : args) storage_.push_back(arg.ToStdWstring());
+
+        argv_.reserve(storage_.size() + 1);
+        for (const std::wstring& arg : storage_) argv_.push_back(arg.c_str());
+        argv_.push_back(nullptr);
+    }
+
+    const wchar_t* const* data() const noexcept { return argv_.data(); }
+
+private:
+    std::vector<std::wstring> storage_;
+    std::vector<const wchar_t*> argv_;
+};
+
+long ExecuteCommand(const wxArrayString& args,
+                    int flags,
+                    wxProcess* process = nullptr) {
+    if (args.empty()) return 0;
+    const ExecuteArguments argv(args);
+    return wxExecute(argv.data(), flags, process);
 }
 
 wxString CreateTimelineTempFile(const wxString& prefix) {
@@ -1799,7 +1831,7 @@ private:
         processCommand_ = JoinCommand(args);
         log_->AppendText("\n[starting job]\n");
         process_ = std::make_unique<CsluProcess>(this);
-        processPid_ = wxExecute(args, wxEXEC_ASYNC, process_.get());
+        processPid_ = ExecuteCommand(args, wxEXEC_ASYNC, process_.get());
         if (processPid_ == 0) {
             log_->AppendText("ERROR: failed to start process.\n");
             process_.reset();
@@ -2165,7 +2197,7 @@ private:
             args.Add(audioPath);
             args.Add(tmp);
             try {
-                const long rc = wxExecute(args, wxEXEC_SYNC);
+                const long rc = ExecuteCommand(args, wxEXEC_SYNC);
                 if (rc != 0 || !wxFileExists(tmp)) {
                     throw std::runtime_error("backend decode-audio-wav failed; check the NeoLIP installation and audio decoder setup");
                 }

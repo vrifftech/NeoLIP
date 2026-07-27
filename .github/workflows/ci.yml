@@ -45,6 +45,19 @@ jobs:
           path: neoshared
           persist-credentials: false
 
+      - name: Verify wxExecute compatibility source
+        working-directory: tool
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "NeoLIP source commit: $(git rev-parse HEAD)"
+          grep -nF 'NEOLIP_WXEXECUTE_ARGV_COMPAT_V1' src/gui/wx_main.cpp
+          if grep -nF 'wxExecute(args' src/gui/wx_main.cpp; then
+            echo 'Obsolete wxExecute(wxArrayString, ...) calls are still present.' >&2
+            exit 1
+          fi
+          test "$(grep -cF 'ExecuteCommand(args' src/gui/wx_main.cpp)" -eq 2
+
       - name: Install build dependencies
         run: |
           sudo apt-get update
@@ -139,6 +152,24 @@ jobs:
           ref: ${{ env.NEOSHARED_REF }}
           path: neoshared
           persist-credentials: false
+
+      - name: Verify wxExecute compatibility source
+        working-directory: tool
+        shell: pwsh
+        run: |
+          $sourcePath = Join-Path $PWD 'src\gui\wx_main.cpp'
+          $source = Get-Content -LiteralPath $sourcePath -Raw
+          Write-Host "NeoLIP source commit: $(git rev-parse HEAD)"
+          if (-not $source.Contains('NEOLIP_WXEXECUTE_ARGV_COMPAT_V1')) {
+            throw "The checked-out NeoLIP source does not contain the wxExecute compatibility adapter: $sourcePath"
+          }
+          if ($source.Contains('wxExecute(args')) {
+            throw "The checked-out NeoLIP source still contains obsolete wxExecute(wxArrayString, ...) calls: $sourcePath"
+          }
+          $count = ([regex]::Matches($source, [regex]::Escape('ExecuteCommand(args'))).Count
+          if ($count -ne 2) {
+            throw "Expected two ExecuteCommand(args) call sites, found $count in $sourcePath"
+          }
 
       - name: Enable vcpkg GitHub Actions cache
         uses: actions/github-script@v9

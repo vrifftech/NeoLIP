@@ -104,10 +104,10 @@ Internal commands:
       Export visible KOTOR mouth keys to an editable TSV table.
 
   lip-import-table <input.tsv> <output.lip>
-      Import an editable TSV table and write a normalized stock KOTOR LIP file.
+      Import an editable TSV table and write a normalized KOTOR LIP file.
 
   lip-normalize <input.lip> <output.lip>
-      Re-sort visible mouth keys and ensure a final shape-0 rest key.
+      Re-sort visible mouth keys and ensure explicit leading and trailing rest records.
 
   lip-shapes
       Print the 16 conventional KOTOR mouth-shape ids and the controller value used by the engine.
@@ -735,26 +735,6 @@ static std::string shapeNameForTsv(std::uint8_t shape) {
     return kotorLipShapeName(shape);
 }
 
-static void normalizeStockLip(KotorStockLip& lip) {
-    std::sort(lip.entries.begin(), lip.entries.end(), [](const KotorStockKeyframe& a, const KotorStockKeyframe& b) {
-        return a.position < b.position;
-    });
-    std::vector<KotorStockKeyframe> unique;
-    for (const auto& e : lip.entries) {
-        KotorStockKeyframe k = e;
-        if (k.shape > 15) k.shape = 15;
-        if (!unique.empty() && unique.back().position == k.position) {
-            unique.back() = k;
-        } else {
-            unique.push_back(k);
-        }
-    }
-    lip.entries = std::move(unique);
-    if (lip.entries.empty()) lip.entries.push_back({kotorStockTimeToPos(0.125), 0});
-    lip.entries.back().shape = 0;
-    lip.durationPosition = lip.entries.back().position;
-}
-
 static int cmdLipExportTable(const std::vector<std::string>& args) {
     if (args.size() != 3) {
         usage();
@@ -762,22 +742,23 @@ static int cmdLipExportTable(const std::vector<std::string>& args) {
     }
     const fs::path inPath = args[1];
     const fs::path outPath = args[2];
-    KotorStockLip lip = readKotorStockLip(inPath);
+    const std::vector<KotorVisibleKeyframe> entries = readKotorVisibleKeyframes(inPath);
     std::ofstream out(outPath, std::ios::binary);
     if (!out) throw std::runtime_error("cannot write LIP table: " + outPath.string());
     out << "index\ttime_seconds\tposition_hex\tshape_id\tshape_name\n";
     out << std::setprecision(9);
-    for (std::size_t i = 0; i < lip.entries.size(); ++i) {
-        const auto& e = lip.entries[i];
+    for (std::size_t i = 0; i < entries.size(); ++i) {
+        const auto& entry = entries[i];
+        const std::uint32_t position = kotorStockTimeToPos(entry.timeSeconds);
         out << i << '\t'
-            << kotorStockPosToTime(e.position) << '\t'
-            << "0x" << std::hex << std::setw(8) << std::setfill('0') << e.position << std::dec << std::setfill(' ') << '\t'
-            << static_cast<unsigned>(e.shape) << '\t'
-            << shapeNameForTsv(e.shape) << "\n";
+            << entry.timeSeconds << '\t'
+            << "0x" << std::hex << std::setw(8) << std::setfill('0') << position << std::dec << std::setfill(' ') << '\t'
+            << static_cast<unsigned>(entry.shape) << '\t'
+            << shapeNameForTsv(entry.shape) << "\n";
     }
     std::cout << "input_lip\t" << inPath.string() << "\n";
     std::cout << "output_tsv\t" << outPath.string() << "\n";
-    std::cout << "visible_keys\t" << lip.entries.size() << "\n";
+    std::cout << "visible_keys\t" << entries.size() << "\n";
     return 0;
 }
 
@@ -790,7 +771,7 @@ static int cmdLipImportTable(const std::vector<std::string>& args) {
     const fs::path outPath = args[2];
     std::ifstream in(inPath);
     if (!in) throw std::runtime_error("cannot read LIP table: " + inPath.string());
-    KotorStockLip lip;
+    std::vector<KotorVisibleKeyframe> entries;
     std::string line;
     std::size_t row = 0;
     while (std::getline(in, line)) {
@@ -807,15 +788,15 @@ static int cmdLipImportTable(const std::vector<std::string>& args) {
         int shape = std::stoi(cols[3]);
         if (shape < 0) shape = 0;
         if (shape > 15) shape = 15;
-        lip.entries.push_back({kotorStockTimeToPos(std::max(0.0, t)), static_cast<std::uint8_t>(shape)});
+        entries.push_back({std::max(0.0, t), static_cast<std::uint8_t>(shape)});
     }
-    normalizeStockLip(lip);
+    normalizeKotorVisibleKeyframes(entries);
     if (!outPath.parent_path().empty()) ensureDirectory(outPath.parent_path());
-    writeKotorStockLip(outPath, lip);
+    writeKotorVisibleKeyframes(outPath, entries);
     std::cout << "input_tsv\t" << inPath.string() << "\n";
     std::cout << "output_lip\t" << outPath.string() << "\n";
-    std::cout << "visible_keys\t" << lip.entries.size() << "\n";
-    std::cout << "duration_seconds\t" << std::setprecision(9) << kotorStockPosToTime(lip.durationPosition) << "\n";
+    std::cout << "visible_keys\t" << entries.size() << "\n";
+    std::cout << "duration_seconds\t" << std::setprecision(9) << entries.back().timeSeconds << "\n";
     return 0;
 }
 
@@ -826,15 +807,15 @@ static int cmdLipNormalize(const std::vector<std::string>& args) {
     }
     const fs::path inPath = args[1];
     const fs::path outPath = args[2];
-    KotorStockLip lip = readKotorStockLip(inPath);
-    normalizeStockLip(lip);
+    std::vector<KotorVisibleKeyframe> entries = readKotorVisibleKeyframes(inPath);
+    normalizeKotorVisibleKeyframes(entries);
     if (!outPath.parent_path().empty()) ensureDirectory(outPath.parent_path());
-    writeKotorStockLip(outPath, lip);
-    auto runtime = readLip(outPath);
-    auto v = validateLipForKotorRuntime(runtime, fs::file_size(outPath));
+    writeKotorVisibleKeyframes(outPath, entries);
+    const LipFile runtime = readLip(outPath);
+    const LipValidation v = validateLipForKotorRuntime(runtime, fs::file_size(outPath));
     std::cout << "input_lip\t" << inPath.string() << "\n";
     std::cout << "output_lip\t" << outPath.string() << "\n";
-    std::cout << "visible_keys\t" << lip.entries.size() << "\n";
+    std::cout << "visible_keys\t" << entries.size() << "\n";
     std::cout << "runtime_verdict\t" << (v.ok ? "PASS" : "FAIL") << "\n";
     return v.ok ? 0 : 1;
 }

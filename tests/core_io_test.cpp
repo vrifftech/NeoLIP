@@ -4,6 +4,7 @@
 #include "wav.hpp"
 
 #include <chrono>
+#include <cstdint>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -32,6 +33,47 @@ void requireThrows(Function&& function, const std::string& message) {
         return;
     }
     throw std::runtime_error(message);
+}
+
+std::uint32_t readU32Le(const unsigned char* bytes) {
+    return static_cast<std::uint32_t>(bytes[0]) |
+           (static_cast<std::uint32_t>(bytes[1]) << 8U) |
+           (static_cast<std::uint32_t>(bytes[2]) << 16U) |
+           (static_cast<std::uint32_t>(bytes[3]) << 24U);
+}
+
+void testUint32LipRecordCount(const fs::path& root) {
+    std::vector<cslu::KotorVisibleKeyframe> keys;
+    keys.reserve(300);
+    for (std::size_t i = 0; i < 300; ++i) {
+        keys.push_back({0.010 * static_cast<double>(i + 1U),
+                        static_cast<std::uint8_t>((i % 15U) + 1U)});
+    }
+    keys.back().shape = 0;
+
+    const fs::path path = root / "uint32-record-count.lip";
+    cslu::writeKotorVisibleKeyframes(path, keys);
+
+    std::ifstream in(path, std::ios::binary);
+    const std::vector<unsigned char> bytes(
+        (std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    require(bytes.size() >= 21U, "high-count LIP output is unexpectedly short");
+    const std::uint32_t totalRecordCount = readU32Le(bytes.data() + 12);
+    require(totalRecordCount == 301U,
+            "LIP writer did not store the total record count as uint32");
+    require(bytes.size() == 16U + 5U * static_cast<std::size_t>(totalRecordCount),
+            "LIP size does not match the uint32 record count");
+    require(readU32Le(bytes.data() + 16) == 0U && bytes[20] == 0U,
+            "LIP writer did not store the explicit initial rest record");
+
+    const cslu::LipFile runtime = cslu::readLip(path);
+    require(runtime.frames.size() == 301U,
+            "canonical LIP reader truncated a record count above 255");
+    const auto visible = cslu::readKotorVisibleKeyframes(path);
+    require(visible.size() == 300U,
+            "editor-visible LIP reader truncated a record count above 255");
+    require(std::fabs(visible.back().timeSeconds - 3.0) < 0.0001,
+            "high-count LIP duration changed during round trip");
 }
 
 void testTransactionalLipWrites(const fs::path& root) {
@@ -134,8 +176,9 @@ int main() {
         require(std::fabs(duration - 1.0) < 0.0001, "visible LIP duration changed during round trip");
         require(readKeys[1].shape == 8 && readKeys.back().shape == 0,
                 "visible LIP shapes changed during round trip");
-        require(fs::file_size(lipPath) == 21U + 5U * keys.size(),
-                "visible LIP writer did not use the stock layout");
+        require(fs::file_size(lipPath) == 16U + 5U * (keys.size() + 1U),
+                "visible LIP writer did not use the canonical uint32-count layout");
+        testUint32LipRecordCount(root);
         testTransactionalLipWrites(root);
         testDecoderArgumentsAreNotShellCommands(root);
 

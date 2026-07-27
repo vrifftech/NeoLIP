@@ -3,7 +3,7 @@ param(
     [string]$BuildDir = '',
     [ValidateSet('Debug','Release','RelWithDebInfo','MinSizeRel')][string]$BuildType = 'Release',
     [ValidateSet('ON','OFF')][string]$Wx = 'ON',
-    [ValidateSet('ON','OFF')][string]$RequireWx = 'OFF',
+    [ValidateSet('ON','OFF')][string]$RequireWx = 'ON',
     [ValidateSet('ON','OFF')][string]$Cli = 'ON',
     [ValidateSet('ON','OFF')][string]$MinimalRelease = 'ON',
     [int]$Parallel = 0,
@@ -21,9 +21,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $RootDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$ProjectName = Split-Path -Leaf $RootDir
-$ProjectPrefix = (($ProjectName -replace '[^A-Za-z0-9]', '').ToUpperInvariant())
-$CMakeLists = Join-Path $RootDir 'CMakeLists.txt'
+$ProjectName = 'NeoLIP'
 
 if ([string]::IsNullOrWhiteSpace($BuildDir)) {
     $BuildDir = Join-Path $RootDir 'build'
@@ -57,23 +55,22 @@ $cmakeArgs += @(
     "-DNEO_MINIMAL_RELEASE=$MinimalRelease"
 )
 
-$wxOption = "${ProjectPrefix}_BUILD_WX_GUI"
-$requireWxOption = "${ProjectPrefix}_REQUIRE_WX_GUI"
-$cliOption = "${ProjectPrefix}_BUILD_CLI"
-if (Select-String -Path $CMakeLists -Pattern ([regex]::Escape($wxOption)) -Quiet) {
-    $cmakeArgs += "-D$wxOption=$Wx"
-}
-if (Select-String -Path $CMakeLists -Pattern ([regex]::Escape($requireWxOption)) -Quiet) {
-    $cmakeArgs += "-D$requireWxOption=$RequireWx"
-}
-if (Select-String -Path $CMakeLists -Pattern ([regex]::Escape($cliOption)) -Quiet) {
-    $cmakeArgs += "-D$cliOption=$Cli"
+$cmakeArgs += @(
+    "-DNEOLIP_BUILD_WX_GUI=$Wx",
+    "-DNEOLIP_REQUIRE_WX_GUI=$RequireWx"
+)
+
+if ($Cli -ne 'ON') {
+    Write-Host 'Note: NeoLIP has no public CLI; -Cli is retained only for compatibility.'
 }
 
 if ([string]::IsNullOrWhiteSpace($NeoSharedRoot)) {
-    $SiblingNeoShared = Join-Path (Split-Path $RootDir -Parent) 'neoshared'
-    if (Test-Path -LiteralPath (Join-Path $SiblingNeoShared 'CMakeLists.txt')) {
-        $NeoSharedRoot = $SiblingNeoShared
+    foreach ($sharedName in @('neoshared', 'NeoShared')) {
+        $SiblingNeoShared = Join-Path (Split-Path $RootDir -Parent) $sharedName
+        if (Test-Path -LiteralPath (Join-Path $SiblingNeoShared 'CMakeLists.txt')) {
+            $NeoSharedRoot = $SiblingNeoShared
+            break
+        }
     }
 }
 
@@ -146,3 +143,30 @@ if (-not [string]::IsNullOrWhiteSpace($Target)) {
 Write-Host "Building $ProjectName"
 & cmake @buildArgs
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+if ($Wx -eq 'ON' -and
+    ([string]::IsNullOrWhiteSpace($Target) -or $Target -eq 'NeoLIP')) {
+    $guiCandidates = @(
+        (Join-Path $BuildDir 'NeoLIP.exe'),
+        (Join-Path $BuildDir 'NeoLIP'),
+        (Join-Path (Join-Path $BuildDir $BuildType) 'NeoLIP.exe'),
+        (Join-Path (Join-Path $BuildDir $BuildType) 'NeoLIP')
+    )
+    $guiPath = $guiCandidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+    if ([string]::IsNullOrWhiteSpace($guiPath)) {
+        throw "NeoLIP GUI was requested, but no NeoLIP executable was produced under $BuildDir"
+    }
+    $backendCandidates = @(
+        (Join-Path $BuildDir 'neolip_backend.exe'),
+        (Join-Path $BuildDir 'neolip_backend'),
+        (Join-Path (Join-Path $BuildDir $BuildType) 'neolip_backend.exe'),
+        (Join-Path (Join-Path $BuildDir $BuildType) 'neolip_backend')
+    )
+    $backendPath = $backendCandidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+    if ([string]::IsNullOrWhiteSpace($backendPath)) {
+        throw "NeoLIP was built without its required backend helper under $BuildDir"
+    }
+
+    Write-Host "Built NeoLIP executable: $guiPath"
+    Write-Host "Built NeoLIP backend:    $backendPath"
+}

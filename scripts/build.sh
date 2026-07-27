@@ -2,13 +2,12 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PROJECT_NAME="$(basename "$ROOT_DIR")"
-PROJECT_PREFIX="$(printf '%s' "$PROJECT_NAME" | tr -cd '[:alnum:]' | tr '[:lower:]' '[:upper:]')"
+PROJECT_NAME="NeoLIP"
 CMAKE_BIN="${CMAKE:-cmake}"
 BUILD_DIR="$ROOT_DIR/build"
 BUILD_TYPE="Release"
 BUILD_WX="ON"
-REQUIRE_WX="OFF"
+REQUIRE_WX="ON"
 BUILD_CLI="ON"
 MINIMAL_RELEASE="ON"
 JOBS="${JOBS:-}"
@@ -30,7 +29,7 @@ Options:
   --build-type TYPE        Debug, Release, RelWithDebInfo, or MinSizeRel
   --wx ON|OFF              Build the wxWidgets GUI target when available
   --require-wx ON|OFF      Fail configure if wxWidgets is unavailable
-  --cli ON|OFF             Build the command-line target when supported
+  --cli ON|OFF             Compatibility option; NeoLIP has no public CLI
   --minimal-release ON|OFF Enable release minimization flags
   --jobs N                 Parallel build jobs
   --target NAME            Build a specific CMake target
@@ -72,6 +71,14 @@ fi
 if [[ -n "$NEOSHARED_ROOT_VALUE" && "$NEOSHARED_ROOT_VALUE" != /* ]]; then
   NEOSHARED_ROOT_VALUE="$ROOT_DIR/$NEOSHARED_ROOT_VALUE"
 fi
+if [[ -z "$NEOSHARED_ROOT_VALUE" ]]; then
+  for candidate in "$ROOT_DIR/../neoshared" "$ROOT_DIR/../NeoShared"; do
+    if [[ -f "$candidate/CMakeLists.txt" ]]; then
+      NEOSHARED_ROOT_VALUE="$(cd "$candidate" && pwd)"
+      break
+    fi
+  done
+fi
 
 if [[ "$CLEAN" == 1 && -e "$BUILD_DIR" ]]; then
   case "$BUILD_DIR" in
@@ -86,17 +93,13 @@ if [[ -n "$GENERATOR" ]]; then
   CONFIG_ARGS=(-G "$GENERATOR" "${CONFIG_ARGS[@]}")
 fi
 
-WX_OPTION="${PROJECT_PREFIX}_BUILD_WX_GUI"
-REQUIRE_WX_OPTION="${PROJECT_PREFIX}_REQUIRE_WX_GUI"
-CLI_OPTION="${PROJECT_PREFIX}_BUILD_CLI"
-if grep -q "$WX_OPTION" "$ROOT_DIR/CMakeLists.txt"; then
-  CONFIG_ARGS+=("-D$WX_OPTION=$BUILD_WX")
-fi
-if grep -q "$REQUIRE_WX_OPTION" "$ROOT_DIR/CMakeLists.txt"; then
-  CONFIG_ARGS+=("-D$REQUIRE_WX_OPTION=$REQUIRE_WX")
-fi
-if grep -q "$CLI_OPTION" "$ROOT_DIR/CMakeLists.txt"; then
-  CONFIG_ARGS+=("-D$CLI_OPTION=$BUILD_CLI")
+CONFIG_ARGS+=(
+  "-DNEOLIP_BUILD_WX_GUI=$BUILD_WX"
+  "-DNEOLIP_REQUIRE_WX_GUI=$REQUIRE_WX"
+)
+
+if [[ "$BUILD_CLI" != "ON" ]]; then
+  printf '%s\n' "Note: NeoLIP has no public CLI; --cli is retained only for compatibility."
 fi
 
 if [[ -n "$NEOSHARED_ROOT_VALUE" ]]; then
@@ -122,3 +125,29 @@ BUILD_ARGS=(--build "$BUILD_DIR" --config "$BUILD_TYPE")
 
 printf 'Building %s\n' "$PROJECT_NAME"
 "$CMAKE_BIN" "${BUILD_ARGS[@]}"
+
+if [[ "$BUILD_WX" == "ON" && ( -z "$TARGET" || "$TARGET" == "NeoLIP" ) ]]; then
+  GUI_PATH=""
+  while IFS= read -r candidate; do
+    GUI_PATH="$candidate"
+    break
+  done < <(find "$BUILD_DIR" -maxdepth 3 -type f \( -name NeoLIP -o -name NeoLIP.exe \) -print 2>/dev/null)
+
+  if [[ -z "$GUI_PATH" ]]; then
+    echo "NeoLIP GUI was requested, but no NeoLIP executable was produced." >&2
+    exit 1
+  fi
+  BACKEND_PATH=""
+  while IFS= read -r candidate; do
+    BACKEND_PATH="$candidate"
+    break
+  done < <(find "$BUILD_DIR" -maxdepth 3 -type f \( -name neolip_backend -o -name neolip_backend.exe \) -print 2>/dev/null)
+
+  if [[ -z "$BACKEND_PATH" ]]; then
+    echo "NeoLIP was built without its required backend helper." >&2
+    exit 1
+  fi
+
+  printf 'Built NeoLIP executable: %s\n' "$GUI_PATH"
+  printf 'Built NeoLIP backend:    %s\n' "$BACKEND_PATH"
+fi

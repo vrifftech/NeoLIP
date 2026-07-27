@@ -5,7 +5,7 @@ if(POLICY CMP0091)
 endif()
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "MSVC runtime library" FORCE)
 
-project(neolip VERSION 0.3.12 LANGUAGES CXX)
+project(NeoLIP VERSION 0.3.12 LANGUAGES CXX)
 set(NEOSHARED_ROOT "" CACHE PATH
     "Path to the neoshared source repository; defaults to ../neoshared")
 
@@ -16,8 +16,18 @@ if(NOT NEOSHARED_ROOT AND DEFINED ENV{NEOSHARED_ROOT}
 endif()
 
 if(NOT NEOSHARED_ROOT)
-    get_filename_component(NEOSHARED_ROOT
-        "${CMAKE_CURRENT_LIST_DIR}/../neoshared" ABSOLUTE)
+    foreach(_neolip_shared_name IN ITEMS neoshared NeoShared)
+        get_filename_component(_neolip_shared_candidate
+            "${CMAKE_CURRENT_LIST_DIR}/../${_neolip_shared_name}" ABSOLUTE)
+        if(EXISTS "${_neolip_shared_candidate}/CMakeLists.txt")
+            set(NEOSHARED_ROOT "${_neolip_shared_candidate}")
+            break()
+        endif()
+    endforeach()
+    if(NOT NEOSHARED_ROOT)
+        get_filename_component(NEOSHARED_ROOT
+            "${CMAKE_CURRENT_LIST_DIR}/../neoshared" ABSOLUTE)
+    endif()
 else()
     get_filename_component(NEOSHARED_ROOT "${NEOSHARED_ROOT}" ABSOLUTE
         BASE_DIR "${CMAKE_CURRENT_LIST_DIR}")
@@ -55,11 +65,11 @@ if(NOT TARGET neoshared::wx)
         "${CMAKE_CURRENT_BINARY_DIR}/neoshared" EXCLUDE_FROM_ALL)
 endif()
 
-set(NEOLIP_APP_VERSION_STRING "0.3.12-neolip-neo2da-style-build-candidate")
-set(NEOLIP_APP_PHASE_STRING "59")
+set(NEOLIP_APP_VERSION_STRING "${PROJECT_VERSION}")
+set(NEOLIP_APP_PHASE_STRING "0")
 
-option(NEOLIP_BUILD_WX_GUI "Build the optional wxWidgets GUI frontend" OFF)
-option(NEOLIP_REQUIRE_WX_GUI "Fail configure if wxWidgets is unavailable while NEOLIP_BUILD_WX_GUI is ON" OFF)
+option(NEOLIP_BUILD_WX_GUI "Build the NeoLIP wxWidgets desktop application" ON)
+option(NEOLIP_REQUIRE_WX_GUI "Fail configure if wxWidgets is unavailable while NEOLIP_BUILD_WX_GUI is ON" ON)
 option(NEOLIP_BUILD_TESTS "Build NeoLIP core I/O tests" OFF)
 
 # Backward-compatible aliases for older build scripts.
@@ -127,35 +137,10 @@ if(NEOLIP_BUILD_TESTS)
     add_test(NAME neolip-core-io COMMAND neolip-core-io-test)
 endif()
 
-install(DIRECTORY dictionaries/ DESTINATION dictionaries FILES_MATCHING PATTERN "*.dict")
-install(FILES
-    docs/CSLU_ASSETS.md
-    docs/THIRD_PARTY_NOTICES.md
-    DESTINATION docs)
-install(DIRECTORY docs/attribution/ DESTINATION docs/attribution)
-install(DIRECTORY docs/licenses/ DESTINATION docs/licenses)
-install(FILES README.md DESTINATION .)
-
-# Install the runtime model and dictionary assets with the standalone
-# application so the normal CMake install tree is self-contained.
+# Runtime assets are installed only when the desktop application target exists.
+# Core/test-only configurations must not produce an asset-only package.
 set(NEOLIP_CSLU_RUNTIME_DIR "${CMAKE_CURRENT_LIST_DIR}/third_party/cslu_runtime")
 set(NEOLIP_CSLU_FA_DIR "${NEOLIP_CSLU_RUNTIME_DIR}/Toolkit/2.0/apps/fa")
-install(FILES
-    "${NEOLIP_CSLU_FA_DIR}/phonemes_new_16k.train.spec"
-    "${NEOLIP_CSLU_FA_DIR}/phonemes_new_16k.parts"
-    DESTINATION models)
-install(DIRECTORY
-    "${NEOLIP_CSLU_FA_DIR}/bc_16k"
-    "${NEOLIP_CSLU_FA_DIR}/trans_16k"
-    DESTINATION models)
-install(FILES "${NEOLIP_CSLU_FA_DIR}/custom_dictionary.txt" DESTINATION dictionaries)
-install(DIRECTORY
-    "${NEOLIP_CSLU_RUNTIME_DIR}/Toolkit/2.0/script/dictionary_1.0/cmu"
-    DESTINATION dictionaries)
-install(FILES
-    "${NEOLIP_CSLU_RUNTIME_DIR}/Festival/1.4.2/festival/lib/dicts/ogi_lex.out"
-    "${NEOLIP_CSLU_RUNTIME_DIR}/Festival/1.4.2/festival/lib/ogi_lex_addenda.scm"
-    DESTINATION dictionaries)
 
 # Direct Windows wxWidgets variables. These remain available for source-built wxWidgets trees.
 set(NEOLIP_WX_ROOT_DIR "" CACHE PATH "Root of an installed wxWidgets tree, for example C:/wxWidgets-3.2.6")
@@ -312,31 +297,65 @@ if(NEOLIP_BUILD_WX_GUI)
         neolip_force_static_msvc_runtime(neolip_backend)
         neo_apply_minimal_release(neolip_backend)
 
-        add_executable(neolip_gui WIN32 src/gui/wx_main.cpp)
-        target_include_directories(neolip_gui PRIVATE src)
-        target_compile_definitions(neolip_gui PRIVATE ${NEOLIP_COMMON_DEFINITIONS})
-        target_link_libraries(neolip_gui PRIVATE neolip_core neoshared::wx)
+        add_executable(NeoLIP WIN32 src/gui/wx_main.cpp)
+        target_include_directories(NeoLIP PRIVATE src)
+        target_compile_definitions(NeoLIP PRIVATE ${NEOLIP_COMMON_DEFINITIONS})
+        target_link_libraries(NeoLIP PRIVATE neolip_core neoshared::wx)
         if(NEOLIP_GUI_WX_MANUAL)
-            target_include_directories(neolip_gui SYSTEM PRIVATE ${NEOLIP_GUI_WX_INCLUDE_DIRS})
-            target_compile_definitions(neolip_gui PRIVATE ${NEOLIP_GUI_WX_DEFINITIONS})
-            target_link_libraries(neolip_gui PRIVATE ${NEOLIP_GUI_WX_LIBRARIES})
+            target_include_directories(NeoLIP SYSTEM PRIVATE ${NEOLIP_GUI_WX_INCLUDE_DIRS})
+            target_compile_definitions(NeoLIP PRIVATE ${NEOLIP_GUI_WX_DEFINITIONS})
+            target_link_libraries(NeoLIP PRIVATE ${NEOLIP_GUI_WX_LIBRARIES})
         else()
-            neolip_link_wx(neolip_gui)
+            neolip_link_wx(NeoLIP)
         endif()
-        target_compile_features(neolip_gui PRIVATE cxx_std_17)
+        target_compile_features(NeoLIP PRIVATE cxx_std_17)
         if(MSVC)
-            target_compile_options(neolip_gui PRIVATE /W4 /permissive- /Zc:__cplusplus)
-            target_compile_definitions(neolip_gui PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX)
+            target_compile_options(NeoLIP PRIVATE /W4 /permissive- /Zc:__cplusplus)
+            target_compile_definitions(NeoLIP PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX)
         else()
-            target_compile_options(neolip_gui PRIVATE -Wall -Wextra -Wpedantic)
+            target_compile_options(NeoLIP PRIVATE -Wall -Wextra -Wpedantic)
         endif()
-        neolip_force_static_msvc_runtime(neolip_gui)
-        neo_apply_minimal_release(neolip_gui)
-        install(TARGETS neolip_gui neolip_backend RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+        neolip_force_static_msvc_runtime(NeoLIP)
+        neo_apply_minimal_release(NeoLIP)
+        if(WIN32)
+            set(NEOLIP_RUNTIME_DESTINATION ".")
+        else()
+            set(NEOLIP_RUNTIME_DESTINATION "${CMAKE_INSTALL_BINDIR}")
+        endif()
+        install(TARGETS NeoLIP neolip_backend
+            RUNTIME DESTINATION "${NEOLIP_RUNTIME_DESTINATION}")
+        install(DIRECTORY dictionaries/ DESTINATION dictionaries FILES_MATCHING PATTERN "*.dict")
+        install(FILES
+            docs/CSLU_ASSETS.md
+            docs/THIRD_PARTY_NOTICES.md
+            DESTINATION docs)
+        install(DIRECTORY docs/attribution/ DESTINATION docs/attribution)
+        install(DIRECTORY docs/licenses/ DESTINATION docs/licenses)
+        install(FILES README.md DESTINATION .)
+        install(FILES
+            "${NEOLIP_CSLU_FA_DIR}/phonemes_new_16k.train.spec"
+            "${NEOLIP_CSLU_FA_DIR}/phonemes_new_16k.parts"
+            DESTINATION models)
+        install(DIRECTORY
+            "${NEOLIP_CSLU_FA_DIR}/bc_16k"
+            "${NEOLIP_CSLU_FA_DIR}/trans_16k"
+            DESTINATION models)
+        install(FILES "${NEOLIP_CSLU_FA_DIR}/custom_dictionary.txt" DESTINATION dictionaries)
+        install(DIRECTORY
+            "${NEOLIP_CSLU_RUNTIME_DIR}/Toolkit/2.0/script/dictionary_1.0/cmu"
+            DESTINATION dictionaries)
+        install(FILES
+            "${NEOLIP_CSLU_RUNTIME_DIR}/Festival/1.4.2/festival/lib/dicts/ogi_lex.out"
+            "${NEOLIP_CSLU_RUNTIME_DIR}/Festival/1.4.2/festival/lib/ogi_lex_addenda.scm"
+            DESTINATION dictionaries)
+
+        if(NEOLIP_BUILD_TESTS AND WIN32)
+            add_test(NAME neolip-gui-startup COMMAND NeoLIP --smoke-test)
+        endif()
     elseif(NEOLIP_REQUIRE_WX_GUI)
         message(FATAL_ERROR "wxWidgets was not found, but NEOLIP_REQUIRE_WX_GUI is ON. On Windows, use the pinned wxWidgets 3.3.3 overlay from neoshared; on Debian or Ubuntu, install libwxgtk3.2-dev")
     else()
-        message(STATUS "wxWidgets not found; skipping optional NeoLIP GUI")
+        message(STATUS "wxWidgets not found; skipping NeoLIP desktop application because NEOLIP_REQUIRE_WX_GUI is OFF")
     endif()
 endif()
 
@@ -346,4 +365,8 @@ set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "NeoLIP: GUI for CSLU-compatible KOTOR LIP generation")
 set(CPACK_PACKAGE_FILE_NAME "NeoLIP-${PROJECT_VERSION}-${CMAKE_SYSTEM_NAME}")
 set(CPACK_GENERATOR "ZIP")
-include(CPack)
+if(TARGET NeoLIP)
+    include(CPack)
+else()
+    message(STATUS "NeoLIP package generation is disabled because the desktop application target was not built")
+endif()

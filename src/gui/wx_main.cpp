@@ -1537,7 +1537,7 @@ private:
         wxFileName toolName(ToolPath());
         if (!toolName.IsAbsolute() || !wxFileExists(ToolPath())) {
             wxMessageBox("NeoLIP's internal backend helper is missing:\n\n" + ToolPath() +
-                             "\n\nKeep neolip_backend beside neolip_gui, or reinstall NeoLIP.",
+                             "\n\nKeep neolip_backend beside NeoLIP, or reinstall NeoLIP.",
                          "Incomplete NeoLIP installation", wxOK | wxICON_ERROR, this);
             return false;
         }
@@ -1898,7 +1898,7 @@ private:
     }
 
     void OnSaveLog(wxCommandEvent&) {
-        wxFileDialog dlg(this, "Save activity log", wxEmptyString, "neolip_gui_log.txt", "Text files (*.txt)|*.txt|All files (*.*)|*.*", wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
+        wxFileDialog dlg(this, "Save activity log", wxEmptyString, "NeoLIP-log.txt", "Text files (*.txt)|*.txt|All files (*.*)|*.*", wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
         if (dlg.ShowModal() != wxID_OK) return;
         wxFFile f(dlg.GetPath(), "wb");
         if (!f.IsOpened()) { wxMessageBox("Could not write log file.", "Save failed", wxOK | wxICON_ERROR, this); return; }
@@ -2295,9 +2295,16 @@ class NeoLipGuiApp final : public wxApp {
 public:
     bool OnInit() override {
         if (!wxApp::OnInit()) return false;
-        SetAppName("neolip_gui");
+        SetAppName("NeoLIP");
+
+        const bool smokeTest =
+            argc > 1 && wxString(argv[1]) == wxString::FromUTF8("--smoke-test");
+
         auto* frame = new MainFrame();
         frame->Show(true);
+        if (smokeTest) {
+            CallAfter([frame]() { frame->Close(true); });
+        }
         return true;
     }
 };

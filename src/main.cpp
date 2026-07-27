@@ -70,7 +70,7 @@ static void usage() {
     std::cerr <<
 R"(neolip_backend - private NeoLIP GUI worker
 
-This executable is an internal companion to neolip_gui. It is not a supported
+This executable is an internal companion to NeoLIP. It is not a supported
 user-facing command-line application.
 
 Internal commands:
@@ -348,7 +348,7 @@ Internal commands:
       Build graph+mapping lists from the trace NTP, use trace nnet outputs, and write
       generated graph/mapping/prob/*.tsv without consuming traced mapping lists.
 
-  bundle-assets | package-assets <source_cslu_or_apps_fa> <package_dir> [--backend neolip_backend.exe] [--gui neolip_gui.exe] [--kotor-dict dictionaries/kotor_override.dict]
+  bundle-assets | package-assets <source_cslu_or_apps_fa> <package_dir> [--backend neolip_backend.exe] [--gui NeoLIP.exe] [--kotor-dict dictionaries/kotor_override.dict]
       Copy only the required CSLU FA models and dictionaries into a standalone package layout.
 
   check-bundle | validate-package <package_dir_or_models_dir>
@@ -4667,14 +4667,14 @@ static void writeStandaloneUsageDoc(const fs::path& path) {
     out << "This package contains the NeoLIP GUI and the assets needed for CSLU-compatible KOTOR LIP generation.\n\n";
     out << "## Layout\n\n";
     out << "```text\n";
-    out << "bin/                  neolip_gui.exe plus its private neolip_backend.exe helper\n";
+    out << "bin/                  NeoLIP.exe plus its private neolip_backend.exe helper\n";
     out << "models/               CSLU FA acoustic models/specs/maps\n";
     out << "dictionaries/         CSLU dictionaries plus kotor_override.dict\n";
     out << "examples/             bundled CSLU test WAV/TXT/NTP files\n";
     out << "docs/                 usage notes\n";
     out << "```\n\n";
     out << "## Start NeoLIP\n\n";
-    out << "Launch `bin/neolip_gui` on Linux/macOS or `bin\\neolip_gui.exe` on Windows. Select this package root (or its `models` folder) under Package/models.\n\n";
+    out << "Launch `bin/NeoLIP` on Linux/macOS or `bin\\NeoLIP.exe` on Windows. Select this package root (or its `models` folder) under Package/models.\n\n";
     out << "Use the Align, Batch, Unknown words, PHN preview, LIP editor, LIP timeline, Text to NTP, and Dictionary lookup tabs for all supported workflows.\n\n";
     out << "`neolip_backend` is a private worker used by the GUI for cancellable background jobs. Do not launch or redistribute it separately from the GUI.\n\n";
     out << "Preserve docs/THIRD_PARTY_NOTICES.md and docs/licenses/ when redistributing a bundle that includes CSLU/OGI/Festival assets.\n";
@@ -4755,7 +4755,7 @@ static int cmdPackageAssets(const std::vector<std::string>& args) {
     if (!guiExe.empty()) copyFileIfExists(guiExe, bin / guiExe.filename(), false);
     if (!fs::exists(bin / "README.txt")) {
         std::ofstream br(bin / "README.txt", std::ios::binary);
-        br << "Keep neolip_gui.exe and its private neolip_backend.exe helper together in this folder.\n";
+        br << "Keep NeoLIP.exe and its private neolip_backend.exe helper together in this folder.\n";
     }
 
     copyFileIfExists(kotorDictSourceRoot / "tools" / "RUN_SMOKE_TESTS.sh", packageRoot / "RUN_SMOKE_TESTS.sh", false);

@@ -14,9 +14,11 @@ NeoLIP's CMake installation rules use that path when producing a self-contained 
 
 ```text
 NeoLIP/
+  NeoLIP.exe                    Windows desktop application
+  neolip_backend.exe            Windows private GUI worker
   bin/
-    neolip_gui(.exe)
-    neolip_backend(.exe)        private GUI worker
+    NeoLIP                      Linux desktop launcher
+    neolip_backend              Linux private GUI worker
   models/
     phonemes_new_16k.train.spec
     phonemes_new_16k.parts

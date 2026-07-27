@@ -4739,16 +4739,6 @@ static int cmdPackageAssets(const std::vector<std::string>& args) {
         br << "Keep NeoLIP.exe and its private neolip_backend.exe helper together in this folder.\n";
     }
 
-    copyFileIfExists(kotorDictSourceRoot / "tools" / "RUN_SMOKE_TESTS.sh", packageRoot / "RUN_SMOKE_TESTS.sh", false);
-    copyFileIfExists(kotorDictSourceRoot / "tools" / "RUN_SMOKE_TESTS.ps1", packageRoot / "RUN_SMOKE_TESTS.ps1", false);
-    {
-        std::error_code ec;
-        fs::permissions(packageRoot / "RUN_SMOKE_TESTS.sh",
-                        fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec,
-                        fs::perm_options::add,
-                        ec);
-    }
-
     writeStandaloneUsageDoc(docs / "usage.md");
     {
         const fs::path sourceDocs = kotorDictSourceRoot / "docs";

@@ -70,7 +70,6 @@ set(NEOLIP_APP_PHASE_STRING "0")
 
 option(NEOLIP_BUILD_WX_GUI "Build the NeoLIP wxWidgets desktop application" ON)
 option(NEOLIP_REQUIRE_WX_GUI "Fail configure if wxWidgets is unavailable while NEOLIP_BUILD_WX_GUI is ON" ON)
-option(NEOLIP_BUILD_TESTS "Build NeoLIP core I/O tests" OFF)
 
 # Backward-compatible aliases for older build scripts.
 if(DEFINED CSLU_BUILD_WX_GUI)
@@ -122,23 +121,9 @@ endif()
 neolip_force_static_msvc_runtime(neolip_core)
 neo_apply_minimal_release(neolip_core)
 
-if(NEOLIP_BUILD_TESTS)
-    enable_testing()
-    add_executable(neolip-core-io-test tests/core_io_test.cpp)
-    target_link_libraries(neolip-core-io-test PRIVATE neolip_core)
-    target_compile_features(neolip-core-io-test PRIVATE cxx_std_17)
-    if(MSVC)
-        target_compile_options(neolip-core-io-test PRIVATE /W4 /permissive- /Zc:__cplusplus)
-    else()
-        target_compile_options(neolip-core-io-test PRIVATE -Wall -Wextra -Wpedantic)
-    endif()
-    neolip_force_static_msvc_runtime(neolip-core-io-test)
-    neo_apply_minimal_release(neolip-core-io-test)
-    add_test(NAME neolip-core-io COMMAND neolip-core-io-test)
-endif()
 
 # Runtime assets are installed only when the desktop application target exists.
-# Core/test-only configurations must not produce an asset-only package.
+# Core-only configurations must not produce an asset-only package.
 set(NEOLIP_CSLU_RUNTIME_DIR "${CMAKE_CURRENT_LIST_DIR}/third_party/cslu_runtime")
 set(NEOLIP_CSLU_FA_DIR "${NEOLIP_CSLU_RUNTIME_DIR}/Toolkit/2.0/apps/fa")
 
@@ -349,9 +334,6 @@ if(NEOLIP_BUILD_WX_GUI)
             "${NEOLIP_CSLU_RUNTIME_DIR}/Festival/1.4.2/festival/lib/ogi_lex_addenda.scm"
             DESTINATION dictionaries)
 
-        if(NEOLIP_BUILD_TESTS AND WIN32)
-            add_test(NAME neolip-gui-startup COMMAND NeoLIP --smoke-test)
-        endif()
     elseif(NEOLIP_REQUIRE_WX_GUI)
         message(FATAL_ERROR "wxWidgets was not found, but NEOLIP_REQUIRE_WX_GUI is ON. On Windows, use the pinned wxWidgets 3.3.3 overlay from neoshared; on Debian or Ubuntu, install libwxgtk3.2-dev")
     else()

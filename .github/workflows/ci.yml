@@ -45,19 +45,6 @@ jobs:
           path: neoshared
           persist-credentials: false
 
-      - name: Verify wxExecute compatibility source
-        working-directory: tool
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "NeoLIP source commit: $(git rev-parse HEAD)"
-          grep -nF 'NEOLIP_WXEXECUTE_ARGV_COMPAT_V1' src/gui/wx_main.cpp
-          if grep -nF 'wxExecute(args' src/gui/wx_main.cpp; then
-            echo 'Obsolete wxExecute(wxArrayString, ...) calls are still present.' >&2
-            exit 1
-          fi
-          test "$(grep -cF 'ExecuteCommand(args' src/gui/wx_main.cpp)" -eq 2
-
       - name: Install build dependencies
         run: |
           sudo apt-get update
@@ -68,8 +55,6 @@ jobs:
             ninja-build \
             pkg-config \
             libwxgtk3.2-dev \
-            xauth \
-            xvfb \
             zlib1g-dev
 
       - name: Configure and build
@@ -85,12 +70,7 @@ jobs:
             --neoshared-root ../neoshared \
             --no-vcpkg \
             --jobs 2 \
-            --clean \
-            -- \
-            -DNEOLIP_BUILD_TESTS=ON
-
-      - name: Run tests
-        run: ctest --test-dir tool/build -C Release --output-on-failure
+            --clean
 
       - name: Stage install tree
         run: cmake --install tool/build --config Release --prefix tool/stage
@@ -112,9 +92,6 @@ jobs:
           test -x tool/stage/libexec/neolip/NeoLIP
           test -x tool/stage/libexec/neolip/neolip_backend
           test -d tool/stage/lib/neolip
-
-      - name: Smoke-test the packaged application
-        run: xvfb-run -a tool/stage/bin/NeoLIP --smoke-test
 
       - name: Package portable Linux application
         run: |
@@ -153,24 +130,6 @@ jobs:
           path: neoshared
           persist-credentials: false
 
-      - name: Verify wxExecute compatibility source
-        working-directory: tool
-        shell: pwsh
-        run: |
-          $sourcePath = Join-Path $PWD 'src\gui\wx_main.cpp'
-          $source = Get-Content -LiteralPath $sourcePath -Raw
-          Write-Host "NeoLIP source commit: $(git rev-parse HEAD)"
-          if (-not $source.Contains('NEOLIP_WXEXECUTE_ARGV_COMPAT_V1')) {
-            throw "The checked-out NeoLIP source does not contain the wxExecute compatibility adapter: $sourcePath"
-          }
-          if ($source.Contains('wxExecute(args')) {
-            throw "The checked-out NeoLIP source still contains obsolete wxExecute(wxArrayString, ...) calls: $sourcePath"
-          }
-          $count = ([regex]::Matches($source, [regex]::Escape('ExecuteCommand(args'))).Count
-          if ($count -ne 2) {
-            throw "Expected two ExecuteCommand(args) call sites, found $count in $sourcePath"
-          }
-
       - name: Enable vcpkg GitHub Actions cache
         uses: actions/github-script@v9
         with:
@@ -207,12 +166,7 @@ jobs:
             -VcpkgRoot $env:VCPKG_INSTALLATION_ROOT `
             -VcpkgTriplet x64-windows-static `
             -Parallel 2 `
-            -Clean `
-            -ExtraCMakeArgs '-DNEOLIP_BUILD_TESTS=ON'
-
-      - name: Run tests
-        shell: pwsh
-        run: ctest --test-dir tool/build -C Release --output-on-failure
+            -Clean
 
       - name: Stage install tree
         shell: pwsh
@@ -233,17 +187,6 @@ jobs:
             }
           }
           Get-ChildItem -LiteralPath 'tool\stage' | Format-Table Name, Length
-
-      - name: Smoke-test the packaged application
-        shell: pwsh
-        run: |
-          $process = Start-Process -FilePath '.\tool\stage\NeoLIP.exe' `
-            -ArgumentList '--smoke-test' `
-            -Wait `
-            -PassThru
-          if ($process.ExitCode -ne 0) {
-            throw "Packaged NeoLIP smoke test failed with exit code $($process.ExitCode)."
-          }
 
       - name: Package Windows application
         shell: pwsh

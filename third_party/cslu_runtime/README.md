@@ -2,7 +2,7 @@
 
 This directory contains the minimum CSLU/Festival/OGI runtime assets NeoLIP needs to build a self-contained runtime bundle.
 
-NeoLIP uses these files only as runtime data: forced-alignment model files, CSLU CMU dictionary files, OGI lexicon/addenda, and CSLU sample files for smoke testing.
+NeoLIP uses these files only as runtime data: forced-alignment model files, CSLU CMU dictionary files, OGI lexicon/addenda, and the original CSLU sample files.
 
 NeoLIP's CMake installation rules use:
 

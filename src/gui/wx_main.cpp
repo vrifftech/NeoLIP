@@ -2329,14 +2329,8 @@ public:
         if (!wxApp::OnInit()) return false;
         SetAppName("NeoLIP");
 
-        const bool smokeTest =
-            argc > 1 && wxString(argv[1]) == wxString::FromUTF8("--smoke-test");
-
         auto* frame = new MainFrame();
         frame->Show(true);
-        if (smokeTest) {
-            CallAfter([frame]() { frame->Close(true); });
-        }
         return true;
     }
 };

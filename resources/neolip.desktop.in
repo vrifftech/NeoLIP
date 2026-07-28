@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=NeoLIP
+Comment=Create and edit KotOR lip-animation files
+Exec=NeoLIP
+Icon=neolip
+Terminal=false
+Categories=AudioVideo;Audio;Utility;
+StartupNotify=true

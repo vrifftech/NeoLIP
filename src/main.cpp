@@ -4651,12 +4651,12 @@ static void writeStandaloneUsageDoc(const fs::path& path) {
     out << "bin/                  NeoLIP.exe plus its private neolip_backend.exe helper\n";
     out << "models/               CSLU FA acoustic models/specs/maps\n";
     out << "dictionaries/         CSLU dictionaries plus kotor_override.dict\n";
-    out << "examples/             bundled CSLU test WAV/TXT/NTP files\n";
+    out << "examples/             bundled sample input files\n";
     out << "docs/                 usage notes\n";
     out << "```\n\n";
     out << "## Start NeoLIP\n\n";
-    out << "Launch `bin/NeoLIP` on Linux/macOS or `bin\\NeoLIP.exe` on Windows. Select this package root (or its `models` folder) under Package/models.\n\n";
-    out << "Use the Align, Batch, Unknown words, PHN preview, LIP editor, LIP timeline, Text to NTP, and Dictionary lookup tabs for all supported workflows.\n\n";
+    out << "Launch `bin/NeoLIP` on Linux/macOS or `bin\\NeoLIP.exe` on Windows. Select the package's `models` folder under Settings > Models.\n\n";
+    out << "Use Create for WAV/TXT-to-LIP generation, Edit for synchronized timeline/table editing, and Batch for folder processing. Pronunciation tools are under Tools > Pronunciation Dictionary.\n\n";
     out << "`neolip_backend` is a private worker used by the GUI for cancellable background jobs. Do not launch or redistribute it separately from the GUI.\n\n";
     out << "Preserve docs/THIRD_PARTY_NOTICES.md and docs/licenses/ when redistributing a bundle that includes CSLU/OGI/Festival assets.\n";
 }

@@ -282,7 +282,22 @@ if(NEOLIP_BUILD_WX_GUI)
         neolip_force_static_msvc_runtime(neolip_backend)
         neo_apply_minimal_release(neolip_backend)
 
-        add_executable(NeoLIP WIN32 src/gui/wx_main.cpp)
+        set(NEOLIP_WX_SOURCES src/gui/wx_main.cpp)
+        if(WIN32)
+            list(APPEND NEOLIP_WX_SOURCES resources/neolip.rc)
+        elseif(APPLE)
+            list(APPEND NEOLIP_WX_SOURCES resources/neolip.icns)
+            set_source_files_properties(resources/neolip.icns PROPERTIES
+                MACOSX_PACKAGE_LOCATION "Resources")
+        endif()
+
+        if(WIN32)
+            add_executable(NeoLIP WIN32 ${NEOLIP_WX_SOURCES})
+        elseif(APPLE)
+            add_executable(NeoLIP MACOSX_BUNDLE ${NEOLIP_WX_SOURCES})
+        else()
+            add_executable(NeoLIP ${NEOLIP_WX_SOURCES})
+        endif()
         target_include_directories(NeoLIP PRIVATE src)
         target_compile_definitions(NeoLIP PRIVATE ${NEOLIP_COMMON_DEFINITIONS})
         target_link_libraries(NeoLIP PRIVATE neolip_core neoshared::wx)
@@ -302,13 +317,34 @@ if(NEOLIP_BUILD_WX_GUI)
         endif()
         neolip_force_static_msvc_runtime(NeoLIP)
         neo_apply_minimal_release(NeoLIP)
+        if(APPLE)
+            set_target_properties(NeoLIP PROPERTIES
+                MACOSX_BUNDLE_ICON_FILE "neolip.icns")
+        endif()
         if(WIN32)
             set(NEOLIP_RUNTIME_DESTINATION ".")
         else()
             set(NEOLIP_RUNTIME_DESTINATION "${CMAKE_INSTALL_BINDIR}")
         endif()
-        install(TARGETS NeoLIP neolip_backend
+        install(TARGETS NeoLIP
+            BUNDLE DESTINATION .
             RUNTIME DESTINATION "${NEOLIP_RUNTIME_DESTINATION}")
+        install(TARGETS neolip_backend
+            RUNTIME DESTINATION "${NEOLIP_RUNTIME_DESTINATION}")
+
+        if(UNIX AND NOT APPLE)
+            foreach(NEOLIP_ICON_SIZE 16 24 32 48 64 128 256 512)
+                install(FILES resources/icons/${NEOLIP_ICON_SIZE}x${NEOLIP_ICON_SIZE}/neolip.png
+                    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/${NEOLIP_ICON_SIZE}x${NEOLIP_ICON_SIZE}/apps)
+            endforeach()
+            install(FILES resources/neolip.svg
+                DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/scalable/apps)
+            configure_file(resources/neolip.desktop.in
+                ${CMAKE_CURRENT_BINARY_DIR}/neolip.desktop @ONLY)
+            install(FILES ${CMAKE_CURRENT_BINARY_DIR}/neolip.desktop
+                DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications)
+        endif()
+
         install(DIRECTORY dictionaries/ DESTINATION dictionaries FILES_MATCHING PATTERN "*.dict")
         install(FILES
             docs/CSLU_ASSETS.md

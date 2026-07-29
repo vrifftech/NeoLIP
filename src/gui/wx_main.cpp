@@ -17,6 +17,7 @@
 #include <wx/filename.h>
 #include <wx/fileconf.h>
 #include <wx/sizer.h>
+#include <wx/scrolwin.h>
 #include <wx/textctrl.h>
 #include <wx/choice.h>
 #include <wx/checkbox.h>
@@ -354,13 +355,14 @@ public:
 class MainFrame final : public wxFrame {
 public:
     MainFrame()
-        : wxFrame(nullptr, wxID_ANY, "NeoLIP", wxDefaultPosition, wxSize(1140, 860)),
+        : wxFrame(nullptr, wxID_ANY, "NeoLIP", wxDefaultPosition, wxDefaultSize),
           timer_(this, ID_ProcessTimer) {
         SetIcon(wxIcon(neolip_icon_xpm));
-        SetMinSize(wxSize(980, 700));
         BuildMenus();
         BuildUi();
+        wxui::configureResponsiveWindow(*this, wxSize(1140, 860), wxSize(720, 480));
         LoadConfig();
+        wxui::constrainWindowToDisplay(*this);
         BindEvents();
         fontScaleWheelFilter_.attach(this, [this](int steps) { ChangeFontScaleSteps(steps); });
         neoview::bindFontScaleDpiRefresh(this, [this]() { ApplyFontScale(); });
@@ -672,11 +674,12 @@ private:
 
         BuildDictionaryDialog();
         wxui::createStatusBar(*this);
-        Centre();
     }
 
     wxPanel* BuildCreatePage(wxWindow* parent) {
-        auto* panel = new wxPanel(parent);
+        auto* panel = new wxScrolledWindow(
+            parent, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxVSCROLL);
+        panel->SetScrollRate(0, FromDIP(10));
         auto* outer = new wxBoxSizer(wxVERTICAL);
         panel->SetSizer(outer);
 
@@ -770,6 +773,12 @@ private:
         checks->Add(writeReports_, 0);
         advancedGrid->Add(checks, 0, wxEXPAND);
         outer->Add(advanced, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
+        advanced->Bind(wxEVT_COLLAPSIBLEPANE_CHANGED,
+                       [panel](wxCollapsiblePaneEvent& event) {
+                           panel->Layout();
+                           panel->FitInside();
+                           event.Skip();
+                       });
 
         auto* buttons = new wxBoxSizer(wxHORIZONTAL);
         buttons->Add(new wxButton(panel, ID_RunAlign, "Create LIP"), 0, wxRIGHT, 8);
@@ -779,6 +788,7 @@ private:
             0, wxALIGN_CENTER_VERTICAL);
         buttons->AddStretchSpacer(1);
         outer->Add(buttons, 0, wxEXPAND | wxALL, 10);
+        panel->FitInside();
         return panel;
     }
 
@@ -906,7 +916,9 @@ private:
     }
 
     wxPanel* BuildBatchPage(wxWindow* parent) {
-        auto* panel = new wxPanel(parent);
+        auto* panel = new wxScrolledWindow(
+            parent, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxVSCROLL);
+        panel->SetScrollRate(0, FromDIP(10));
         auto* outer = new wxBoxSizer(wxVERTICAL);
         panel->SetSizer(outer);
 
@@ -995,6 +1007,12 @@ private:
         checks->Add(batchResume_, 0);
         advancedGrid->Add(checks, 0, wxEXPAND);
         outer->Add(advanced, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
+        advanced->Bind(wxEVT_COLLAPSIBLEPANE_CHANGED,
+                       [panel](wxCollapsiblePaneEvent& event) {
+                           panel->Layout();
+                           panel->FitInside();
+                           event.Skip();
+                       });
 
         auto* buttons = new wxBoxSizer(wxHORIZONTAL);
         buttons->Add(new wxButton(panel, ID_RunBatch, "Create LIP files"), 0, wxRIGHT, 8);
@@ -1003,6 +1021,7 @@ private:
             0, wxALIGN_CENTER_VERTICAL);
         buttons->AddStretchSpacer(1);
         outer->Add(buttons, 0, wxEXPAND | wxALL, 10);
+        panel->FitInside();
         return panel;
     }
 
@@ -1096,9 +1115,8 @@ private:
     void BuildDictionaryDialog() {
         dictionaryDialog_ = new wxDialog(
             this, wxID_ANY, "Pronunciation Dictionary",
-            wxDefaultPosition, wxSize(820, 560),
+            wxDefaultPosition, wxDefaultSize,
             wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER);
-        dictionaryDialog_->SetMinSize(wxSize(700, 440));
         auto* root = new wxBoxSizer(wxVERTICAL);
         dictionaryDialog_->SetSizer(root);
         auto* book = new wxNotebook(dictionaryDialog_, wxID_ANY);
@@ -1107,6 +1125,7 @@ private:
         root->Add(book, 1, wxEXPAND | wxALL, 8);
         auto* close = new wxButton(dictionaryDialog_, wxID_CLOSE, "Close");
         root->Add(close, 0, wxALIGN_RIGHT | wxLEFT | wxRIGHT | wxBOTTOM, 8);
+        wxui::configureResponsiveWindow(*dictionaryDialog_, wxSize(820, 560), wxSize(560, 380));
         close->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { dictionaryDialog_->Hide(); });
         dictionaryDialog_->Bind(wxEVT_CLOSE_WINDOW, [this](wxCloseEvent& event) {
             dictionaryDialog_->Hide();
@@ -1461,7 +1480,6 @@ private:
         wxDialog dialog(this, wxID_ANY, "Models",
                         wxDefaultPosition, wxDefaultSize,
                         wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER);
-        dialog.SetMinSize(FromDIP(wxSize(650, 190)));
         auto* root = new wxBoxSizer(wxVERTICAL);
         dialog.SetSizer(root);
 
@@ -1504,12 +1522,16 @@ private:
         });
 
         dialog.Fit();
+        wxui::configureResponsiveWindow(dialog, wxSize(700, 260), wxSize(480, 220));
         dialog.CentreOnParent();
+        wxui::constrainWindowToDisplay(dialog);
         dialog.ShowModal();
     }
 
     void OnShowPronunciationDictionary(wxCommandEvent&) {
         if (dictionaryDialog_ == nullptr) return;
+        dictionaryDialog_->CentreOnParent();
+        wxui::constrainWindowToDisplay(*dictionaryDialog_);
         dictionaryDialog_->Show(true);
         dictionaryDialog_->Raise();
         dictionaryDialog_->SetFocus();

@@ -5,6 +5,9 @@
 /install/
 /dist/
 /stage/
+/package/
+/NeoLIP-*.zip
+/NeoLIP-*.tar.gz
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake

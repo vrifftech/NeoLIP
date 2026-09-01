@@ -99,7 +99,7 @@ Pronunciation and alignment intermediates remain internal to WAV/TXT-to-LIP gene
 
 The Windows package puts `NeoLIP.exe` at its top level. `neolip_backend.exe`, `models/`, and `dictionaries/` are required runtime components; the workflow refuses to publish an archive unless all four are present.
 
-The source tree includes the runtime assets under `third_party/cslu_runtime`. Preserve `docs/THIRD_PARTY_NOTICES.md`, `docs/attribution/`, and `docs/licenses/` in any redistribution containing those assets. `docs/CSLU_ASSETS.md` documents the retained asset set.
+The source tree includes the runtime assets under `third_party/cslu_runtime`.
 
 ## LIP V1.0 format
 

@@ -69,7 +69,7 @@ chmod 0755 "$GUI_PATH" "$REAL_GUI" "$REAL_BACKEND"
     printf 'Build wxWidgets configuration: %s\n' "$(wx-config --selected-config 2>/dev/null || true)"
   fi
   printf '\nLibraries:\n'
-  printf '  %s\n' "${WX_LIBRARY_NAMES[@]}"
+  printf '  %s\n' "${WX_LIBRARY_NAMES[@]+"${WX_LIBRARY_NAMES[@]}"}"
 } > "$STAGE_ROOT/BUNDLED-WXWIDGETS.txt"
 
 verification="$(LD_LIBRARY_PATH="$LIB_DIR" ldd "$REAL_GUI")"

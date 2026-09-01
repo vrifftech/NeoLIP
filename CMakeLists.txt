@@ -60,6 +60,8 @@ include(GNUInstallDirs)
 
 message(STATUS "Using neoshared: ${NEOSHARED_ROOT}")
 include("${NEOSHARED_ROOT}/cmake/NeoMinimalRelease.cmake")
+include("${NEOSHARED_ROOT}/cmake/NeoMacOSBundle.cmake")
+include("${NEOSHARED_ROOT}/cmake/NeoWasm.cmake")
 if(NOT TARGET neoshared::wx)
     add_subdirectory("${NEOSHARED_ROOT}"
         "${CMAKE_CURRENT_BINARY_DIR}/neoshared" EXCLUDE_FROM_ALL)
@@ -285,10 +287,6 @@ if(NEOLIP_BUILD_WX_GUI)
         set(NEOLIP_WX_SOURCES src/gui/wx_main.cpp)
         if(WIN32)
             list(APPEND NEOLIP_WX_SOURCES resources/neolip.rc)
-        elseif(APPLE)
-            list(APPEND NEOLIP_WX_SOURCES resources/neolip.icns)
-            set_source_files_properties(resources/neolip.icns PROPERTIES
-                MACOSX_PACKAGE_LOCATION "Resources")
         endif()
 
         if(WIN32)
@@ -298,6 +296,26 @@ if(NEOLIP_BUILD_WX_GUI)
         else()
             add_executable(NeoLIP ${NEOLIP_WX_SOURCES})
         endif()
+        neo_configure_macos_bundle(NeoLIP
+            NAME "NeoLIP"
+            IDENTIFIER "com.vrifftech.neolip"
+            ICON "${CMAKE_CURRENT_SOURCE_DIR}/resources/neolip.icns"
+        )
+        neo_configure_wasm_target(NeoLIP
+            NAME "NeoLIP"
+            SLUG "neolip"
+            ICON "${CMAKE_CURRENT_SOURCE_DIR}/resources/neolip.svg"
+            PRELOAD
+                "${CMAKE_CURRENT_SOURCE_DIR}/dictionaries@/dictionaries"
+                "${NEOLIP_CSLU_FA_DIR}/phonemes_new_16k.train.spec@/models/phonemes_new_16k.train.spec"
+                "${NEOLIP_CSLU_FA_DIR}/phonemes_new_16k.parts@/models/phonemes_new_16k.parts"
+                "${NEOLIP_CSLU_FA_DIR}/bc_16k@/models/bc_16k"
+                "${NEOLIP_CSLU_FA_DIR}/trans_16k@/models/trans_16k"
+                "${NEOLIP_CSLU_FA_DIR}/custom_dictionary.txt@/dictionaries/custom_dictionary.txt"
+                "${NEOLIP_CSLU_RUNTIME_DIR}/Toolkit/2.0/script/dictionary_1.0/cmu@/dictionaries/cmu"
+                "${NEOLIP_CSLU_RUNTIME_DIR}/Festival/1.4.2/festival/lib/dicts/ogi_lex.out@/dictionaries/ogi_lex.out"
+                "${NEOLIP_CSLU_RUNTIME_DIR}/Festival/1.4.2/festival/lib/ogi_lex_addenda.scm@/dictionaries/ogi_lex_addenda.scm"
+        )
         target_include_directories(NeoLIP PRIVATE src)
         target_compile_definitions(NeoLIP PRIVATE ${NEOLIP_COMMON_DEFINITIONS})
         target_link_libraries(NeoLIP PRIVATE neolip_core neoshared::wx)
@@ -317,10 +335,6 @@ if(NEOLIP_BUILD_WX_GUI)
         endif()
         neolip_force_static_msvc_runtime(NeoLIP)
         neo_apply_minimal_release(NeoLIP)
-        if(APPLE)
-            set_target_properties(NeoLIP PROPERTIES
-                MACOSX_BUNDLE_ICON_FILE "neolip.icns")
-        endif()
         if(WIN32)
             set(NEOLIP_RUNTIME_DESTINATION ".")
         else()
@@ -329,8 +343,17 @@ if(NEOLIP_BUILD_WX_GUI)
         install(TARGETS NeoLIP
             BUNDLE DESTINATION .
             RUNTIME DESTINATION "${NEOLIP_RUNTIME_DESTINATION}")
-        install(TARGETS neolip_backend
-            RUNTIME DESTINATION "${NEOLIP_RUNTIME_DESTINATION}")
+        if(APPLE)
+            install(TARGETS neolip_backend
+                RUNTIME DESTINATION "NeoLIP.app/Contents/MacOS")
+            set(NEOLIP_DATA_PREFIX "NeoLIP.app/Contents/Resources/")
+            set(NEOLIP_DATA_ROOT "NeoLIP.app/Contents/Resources")
+        else()
+            install(TARGETS neolip_backend
+                RUNTIME DESTINATION "${NEOLIP_RUNTIME_DESTINATION}")
+            set(NEOLIP_DATA_PREFIX "")
+            set(NEOLIP_DATA_ROOT ".")
+        endif()
 
         if(UNIX AND NOT APPLE)
             foreach(NEOLIP_ICON_SIZE 16 24 32 48 64 128 256 512)
@@ -345,30 +368,28 @@ if(NEOLIP_BUILD_WX_GUI)
                 DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications)
         endif()
 
-        install(DIRECTORY dictionaries/ DESTINATION dictionaries FILES_MATCHING PATTERN "*.dict")
-        install(FILES
-            docs/CSLU_ASSETS.md
-            docs/THIRD_PARTY_NOTICES.md
-            DESTINATION docs)
-        install(DIRECTORY docs/attribution/ DESTINATION docs/attribution)
-        install(DIRECTORY docs/licenses/ DESTINATION docs/licenses)
-        install(FILES README.md DESTINATION .)
+        install(DIRECTORY dictionaries/
+            DESTINATION "${NEOLIP_DATA_PREFIX}dictionaries"
+            FILES_MATCHING PATTERN "*.dict")
+        install(DIRECTORY docs/attribution/
+            DESTINATION "${NEOLIP_DATA_PREFIX}docs/attribution")
         install(FILES
             "${NEOLIP_CSLU_FA_DIR}/phonemes_new_16k.train.spec"
             "${NEOLIP_CSLU_FA_DIR}/phonemes_new_16k.parts"
-            DESTINATION models)
+            DESTINATION "${NEOLIP_DATA_PREFIX}models")
         install(DIRECTORY
             "${NEOLIP_CSLU_FA_DIR}/bc_16k"
             "${NEOLIP_CSLU_FA_DIR}/trans_16k"
-            DESTINATION models)
-        install(FILES "${NEOLIP_CSLU_FA_DIR}/custom_dictionary.txt" DESTINATION dictionaries)
+            DESTINATION "${NEOLIP_DATA_PREFIX}models")
+        install(FILES "${NEOLIP_CSLU_FA_DIR}/custom_dictionary.txt"
+            DESTINATION "${NEOLIP_DATA_PREFIX}dictionaries")
         install(DIRECTORY
             "${NEOLIP_CSLU_RUNTIME_DIR}/Toolkit/2.0/script/dictionary_1.0/cmu"
-            DESTINATION dictionaries)
+            DESTINATION "${NEOLIP_DATA_PREFIX}dictionaries")
         install(FILES
             "${NEOLIP_CSLU_RUNTIME_DIR}/Festival/1.4.2/festival/lib/dicts/ogi_lex.out"
             "${NEOLIP_CSLU_RUNTIME_DIR}/Festival/1.4.2/festival/lib/ogi_lex_addenda.scm"
-            DESTINATION dictionaries)
+            DESTINATION "${NEOLIP_DATA_PREFIX}dictionaries")
 
     elseif(NEOLIP_REQUIRE_WX_GUI)
         message(FATAL_ERROR "wxWidgets was not found, but NEOLIP_REQUIRE_WX_GUI is ON. On Windows, use the pinned wxWidgets 3.3.3 overlay from neoshared; on Debian or Ubuntu, install libwxgtk3.2-dev")
@@ -387,4 +408,65 @@ if(TARGET NeoLIP)
     include(CPack)
 else()
     message(STATUS "NeoLIP package generation is disabled because the desktop application target was not built")
+endif()
+
+
+# NeoLIP in-process browser backend and media compatibility
+# The desktop companion target remains unchanged. For Emscripten, its sources
+# are compiled into the GUI and main() is renamed in a generated wrapper.
+include_directories("${CMAKE_CURRENT_SOURCE_DIR}/wasm")
+if(EMSCRIPTEN)
+    target_sources(NeoLIP PRIVATE wasm/neolip_wasm_runtime.cpp)
+    target_link_options(NeoLIP PRIVATE
+        "-sASYNCIFY=1"
+        "-sASYNCIFY_STACK_SIZE=1048576"
+    )
+
+    if(NOT TARGET neolip_backend)
+        message(FATAL_ERROR "NeoLIP WASM requires the neolip_backend target")
+    endif()
+
+    get_target_property(_neolip_backend_sources neolip_backend SOURCES)
+    set(_neolip_backend_main "")
+    set(_neolip_backend_embedded_sources "")
+    foreach(_source IN LISTS _neolip_backend_sources)
+        if(_source MATCHES "(^|/)main\\.(c|cc|cpp|cxx)$")
+            set(_neolip_backend_main "${_source}")
+        elseif(_source MATCHES "\\.(c|cc|cpp|cxx)$")
+            list(APPEND _neolip_backend_embedded_sources "${_source}")
+        endif()
+    endforeach()
+    if(NOT _neolip_backend_main)
+        message(FATAL_ERROR "Could not locate neolip_backend main source")
+    endif()
+
+    if(NOT IS_ABSOLUTE "${_neolip_backend_main}")
+        set(_neolip_backend_main "${CMAKE_CURRENT_SOURCE_DIR}/${_neolip_backend_main}")
+    endif()
+    file(TO_CMAKE_PATH "${_neolip_backend_main}" _neolip_backend_main)
+    set(_neolip_embedded_main "${CMAKE_CURRENT_BINARY_DIR}/neolip_backend_embedded_main.cpp")
+    file(GENERATE OUTPUT "${_neolip_embedded_main}" CONTENT
+        "#define main neolip_backend_main\n#include \"${_neolip_backend_main}\"\n")
+
+    target_sources(NeoLIP PRIVATE
+        ${_neolip_backend_embedded_sources}
+        "${_neolip_embedded_main}"
+    )
+
+    foreach(_property IN ITEMS INCLUDE_DIRECTORIES COMPILE_DEFINITIONS COMPILE_OPTIONS)
+        get_target_property(_value neolip_backend ${_property})
+        if(_value AND NOT _value MATCHES "-NOTFOUND$")
+            if(_property STREQUAL "INCLUDE_DIRECTORIES")
+                target_include_directories(NeoLIP PRIVATE ${_value})
+            elseif(_property STREQUAL "COMPILE_DEFINITIONS")
+                target_compile_definitions(NeoLIP PRIVATE ${_value})
+            elseif(_property STREQUAL "COMPILE_OPTIONS")
+                target_compile_options(NeoLIP PRIVATE ${_value})
+            endif()
+        endif()
+    endforeach()
+    get_target_property(_neolip_backend_links neolip_backend LINK_LIBRARIES)
+    if(_neolip_backend_links AND NOT _neolip_backend_links MATCHES "-NOTFOUND$")
+        target_link_libraries(NeoLIP PRIVATE ${_neolip_backend_links})
+    endif()
 endif()

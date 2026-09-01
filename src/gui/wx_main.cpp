@@ -12,7 +12,9 @@
 #include <wx/splitter.h>
 #include <wx/filepicker.h>
 #include <wx/stdpaths.h>
+#ifndef __EMSCRIPTEN__
 #include <wx/process.h>
+#endif
 #include <wx/timer.h>
 #include <wx/filename.h>
 #include <wx/fileconf.h>
@@ -28,7 +30,9 @@
 #include <wx/gauge.h>
 #include <wx/arrstr.h>
 #include <wx/grid.h>
+#ifndef __EMSCRIPTEN__
 #include <wx/sound.h>
+#endif
 #include <wx/dcbuffer.h>
 
 #include "neolip_icon.xpm"
@@ -40,9 +44,16 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <vector>
+
+#if defined(__EMSCRIPTEN__)
+#include <neoshared/wasm_dialog_compat.h>
+#include <neolip_wasm_runtime.h>
+#endif
 
 namespace fs = std::filesystem;
 
@@ -77,6 +88,7 @@ constexpr int ID_FontDecrease = wxID_HIGHEST + 139;
 constexpr int ID_FontReset = wxID_HIGHEST + 140;
 constexpr int ID_ModelsSettings = wxID_HIGHEST + 141;
 constexpr int ID_PronunciationDictionary = wxID_HIGHEST + 142;
+constexpr int ID_SaveLipEditorAs = wxID_HIGHEST + 143;
 
 void AppendChars(wxString& s, size_t count, wxUniChar ch) {
     for (size_t i = 0; i < count; ++i) s += ch;
@@ -122,6 +134,7 @@ wxString JoinCommand(const wxArrayString& args) {
     return command;
 }
 
+#ifndef __EMSCRIPTEN__
 // NEOLIP_WXEXECUTE_ARGV_COMPAT_V1
 // wxWidgets 3.2 exposes wxExecute() overloads for null-terminated argv
 // arrays, but not the wxArrayString overload added by newer releases. Keep
@@ -153,6 +166,18 @@ long ExecuteCommand(const wxArrayString& args,
     return wxExecute(argv.data(), flags, process);
 }
 
+#endif
+
+fs::path ToPath(const wxString& path) {
+    return fs::u8path(wxui::toStd(path));
+}
+
+bool IsRegularFile(const wxString& path) {
+    if (path.empty()) return false;
+    std::error_code error;
+    return fs::is_regular_file(ToPath(path), error);
+}
+
 wxString CreateTimelineTempFile(const wxString& prefix) {
     wxFileName tempPrefix(wxStandardPaths::Get().GetTempDir(), prefix);
     const wxString path = wxFileName::CreateTempFileName(tempPrefix.GetFullPath());
@@ -161,7 +186,13 @@ wxString CreateTimelineTempFile(const wxString& prefix) {
 }
 
 void RemoveFileBestEffort(const wxString& path) {
-    if (!path.empty() && wxFileExists(path)) (void)wxRemoveFile(path);
+    if (IsRegularFile(path)) (void)wxRemoveFile(path);
+}
+
+void OpenExternalPath(const wxString& path, wxWindow* parent = nullptr) {
+    if (path.empty()) return;
+// Browser build uses the native route through neolip_wasm_runtime.
+    wxLaunchDefaultApplication(path);
 }
 
 wxString DefaultToolPath() {
@@ -172,14 +203,14 @@ wxString DefaultToolPath() {
     const wxString toolName = "neolip_backend";
 #endif
     wxFileName candidate(exe.GetPath(), toolName);
-    if (candidate.FileExists()) return candidate.GetFullPath();
+    if (IsRegularFile(candidate.GetFullPath())) return candidate.GetFullPath();
     return toolName;
 }
 
 
 wxString ExistingFileFromCandidates(const wxArrayString& candidates) {
     for (const auto& c : candidates) {
-        if (!c.empty() && wxFileExists(c)) return c;
+        if (!c.empty() && IsRegularFile(c)) return c;
     }
     return wxEmptyString;
 }
@@ -202,6 +233,10 @@ wxString DefaultKotorOverridePath(const wxString& toolPath, const wxString& mode
         const wxString binDir = tool.GetPath();
         if (!binDir.empty()) {
             candidates.Add(binDir + sep + "dictionaries" + sep + "kotor_override.dict");
+            wxFileName fromAppResources(binDir + sep + ".." + sep + "Resources" + sep +
+                                        "dictionaries" + sep + "kotor_override.dict");
+            fromAppResources.Normalize(wxPATH_NORM_DOTS | wxPATH_NORM_ABSOLUTE);
+            candidates.Add(fromAppResources.GetFullPath());
             wxFileName fromPackage(binDir + sep + ".." + sep + "dictionaries" + sep + "kotor_override.dict");
             fromPackage.Normalize(wxPATH_NORM_DOTS | wxPATH_NORM_ABSOLUTE);
             candidates.Add(fromPackage.GetFullPath());
@@ -237,10 +272,6 @@ using GuiLipEntry = cslu::KotorVisibleKeyframe;
 using GuiWaveform = cslu::DecodedWaveform;
 using GuiPhnInterval = cslu::PhnInterval;
 
-fs::path ToPath(const wxString& path) {
-    return fs::u8path(wxui::toStd(path));
-}
-
 wxString KotorShapeName(int shape) {
     if (shape < 0 || shape > 15) return "out of range";
     return wxString::Format("%X: ", shape) +
@@ -269,7 +300,7 @@ void WritePcm16WavGui(const wxString& path, const GuiWaveform& waveform,
 }
 
 std::vector<GuiPhnInterval> ReadGuiPhnIntervals(const wxString& path) {
-    if (path.empty() || !wxFileExists(path)) return {};
+    if (path.empty() || !IsRegularFile(path)) return {};
     return cslu::readPhn(ToPath(path)).intervals;
 }
 
@@ -374,7 +405,9 @@ public:
         timelineSound_.reset();
         RemoveFileBestEffort(timelinePreviewPath_);
         SaveConfig();
+#ifndef __EMSCRIPTEN__
         StopRunningProcess(false);
+#endif
     }
 
 private:
@@ -458,6 +491,7 @@ private:
     std::unique_ptr<wxSound> timelineSound_;
     wxString timelinePreviewPath_;
     bool synchronizingEditViews_ = false;
+    bool lipEditorDirty_ = false;
 
     std::unique_ptr<CsluProcess> process_;
     long processPid_ = 0;
@@ -663,10 +697,14 @@ private:
         saveLogButton_ = new wxButton(this, ID_SaveLog, "Save log");
         openWorkButton_ = new wxButton(this, ID_OpenWorkDir, "Open output/work folder");
         auto* clearButton = new wxButton(this, ID_ClearLog, "Clear log");
+#ifndef __EMSCRIPTEN__
         logButtons->Add(stopButton_, 0, wxRIGHT, 6);
+#endif
         logButtons->Add(copyLogButton_, 0, wxRIGHT, 6);
         logButtons->Add(saveLogButton_, 0, wxRIGHT, 6);
+#ifndef __EMSCRIPTEN__
         logButtons->Add(openWorkButton_, 0, wxRIGHT, 6);
+#endif
         logButtons->AddStretchSpacer(1);
         logButtons->Add(clearButton, 0);
         logBox->Add(logButtons, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 6);
@@ -782,7 +820,9 @@ private:
 
         auto* buttons = new wxBoxSizer(wxHORIZONTAL);
         buttons->Add(new wxButton(panel, ID_RunAlign, "Create LIP"), 0, wxRIGHT, 8);
+#ifndef __EMSCRIPTEN__
         buttons->Add(new wxButton(panel, ID_OpenOutputFolder, "Open output folder"), 0, wxRIGHT, 8);
+#endif
         buttons->Add(new wxStaticText(panel, wxID_ANY,
             "When Output LIP is blank, NeoLIP uses the WAV name in the same folder."),
             0, wxALIGN_CENTER_VERTICAL);
@@ -826,6 +866,7 @@ private:
         auto* controls = new wxBoxSizer(wxHORIZONTAL);
         controls->Add(new wxButton(panel, ID_LoadLipEditor, "Open LIP"), 0, wxRIGHT, 8);
         controls->Add(new wxButton(panel, ID_SaveLipEditor, "Save LIP"), 0, wxRIGHT, 8);
+        controls->Add(new wxButton(panel, ID_SaveLipEditorAs, "Save As..."), 0, wxRIGHT, 8);
         controls->Add(new wxButton(panel, ID_TimelinePlayCursor, "Play from cursor"), 0, wxRIGHT, 8);
         controls->Add(new wxButton(panel, ID_NormalizeLipKeys, "Normalize final rest"), 0, wxRIGHT, 12);
         controls->Add(new wxStaticText(panel, wxID_ANY, "Shape"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
@@ -867,8 +908,14 @@ private:
                 if (!synchronizingEditViews_ && idx >= 0 &&
                     idx < static_cast<int>(timelineEntries_.size()) &&
                     idx < static_cast<int>(lipEditorEntries_.size())) {
+                    const GuiLipEntry previous =
+                        lipEditorEntries_[static_cast<std::size_t>(idx)];
                     timelineEntries_[static_cast<std::size_t>(idx)] = *entry;
                     lipEditorEntries_[static_cast<std::size_t>(idx)] = *entry;
+                    if (previous.timeSeconds != entry->timeSeconds ||
+                        previous.shape != entry->shape) {
+                        lipEditorDirty_ = true;
+                    }
                     synchronizingEditViews_ = true;
                     UpdateLipGridRow(idx);
                     synchronizingEditViews_ = false;
@@ -1148,6 +1195,7 @@ private:
         Bind(wxEVT_BUTTON, &MainFrame::OnOpenWorkDir, this, ID_OpenWorkDir);
         Bind(wxEVT_BUTTON, &MainFrame::OnLoadLipEditor, this, ID_LoadLipEditor);
         Bind(wxEVT_BUTTON, &MainFrame::OnSaveLipEditor, this, ID_SaveLipEditor);
+        Bind(wxEVT_BUTTON, &MainFrame::OnSaveLipEditorAs, this, ID_SaveLipEditorAs);
         Bind(wxEVT_BUTTON, &MainFrame::OnInsertLipKey, this, ID_InsertLipKey);
         Bind(wxEVT_BUTTON, &MainFrame::OnDeleteLipKeys, this, ID_DeleteLipKeys);
         Bind(wxEVT_BUTTON, &MainFrame::OnShiftLipKeys, this, ID_ShiftLipKeys);
@@ -1164,6 +1212,7 @@ private:
         Bind(wxEVT_MENU, &MainFrame::OnResetFontScale, this, ID_FontReset);
         Bind(wxEVT_TIMER, &MainFrame::OnTimer, this, ID_ProcessTimer);
         Bind(wxEVT_END_PROCESS, &MainFrame::OnProcessTerminated, this);
+        Bind(wxEVT_CLOSE_WINDOW, &MainFrame::OnClose, this);
 
         wavPicker_->Bind(wxEVT_FILEPICKER_CHANGED, [this](wxFileDirPickerEvent&) {
             MaybeDeriveAlignOutput();
@@ -1187,6 +1236,7 @@ private:
         });
         lipGrid_->Bind(wxEVT_GRID_CELL_CHANGED, [this](wxGridEvent& event) {
             if (!synchronizingEditViews_ && SyncLipGridToEntries(false)) {
+                lipEditorDirty_ = true;
                 synchronizingEditViews_ = true;
                 UpdateLipGridRow(event.GetRow());
                 synchronizingEditViews_ = false;
@@ -1389,10 +1439,14 @@ private:
     }
 
     wxString DefaultModelRoot() const {
+#ifdef __EMSCRIPTEN__
+        if (IsRegularFile("/models/phonemes_new_16k.train.spec")) return "/models";
+#endif
         wxArrayString candidates;
         const wxString sep(wxFileName::GetPathSeparator());
         wxFileName exe(wxStandardPaths::Get().GetExecutablePath());
         const wxString binDir = exe.GetPath();
+        candidates.Add(binDir + sep + ".." + sep + "Resources" + sep + "models");
         candidates.Add(binDir + sep + "models");
         candidates.Add(binDir + sep + ".." + sep + "models");
         candidates.Add(binDir + sep + ".." + sep + ".." + sep + "models");
@@ -1402,7 +1456,7 @@ private:
             wxFileName root(raw, "");
             root.Normalize(wxPATH_NORM_DOTS | wxPATH_NORM_ABSOLUTE);
             const wxString path = root.GetFullPath();
-            if (wxFileExists(wxFileName(path, "phonemes_new_16k.train.spec").GetFullPath())) {
+            if (IsRegularFile(wxFileName(path, "phonemes_new_16k.train.spec").GetFullPath())) {
                 return path;
             }
         }
@@ -1455,7 +1509,7 @@ private:
 
         wxString missing;
         for (const wxString& path : RequiredModelFiles(root)) {
-            if (!wxFileExists(path)) missing += "  " + path + "\n";
+            if (!IsRegularFile(path)) missing += "  " + path + "\n";
         }
         if (!missing.empty()) {
             wxMessageBox(
@@ -1495,11 +1549,15 @@ private:
 
         auto* buttons = new wxBoxSizer(wxHORIZONTAL);
         auto* validate = new wxButton(&dialog, wxID_ANY, "Validate");
+#ifndef __EMSCRIPTEN__
         auto* open = new wxButton(&dialog, wxID_ANY, "Open folder");
+#endif
         auto* cancel = new wxButton(&dialog, wxID_CANCEL, "Cancel");
         auto* save = new wxButton(&dialog, wxID_OK, "Save");
         buttons->Add(validate, 0, wxRIGHT, 6);
+#ifndef __EMSCRIPTEN__
         buttons->Add(open, 0, wxRIGHT, 6);
+#endif
         buttons->AddStretchSpacer(1);
         buttons->Add(cancel, 0, wxRIGHT, 6);
         buttons->Add(save, 0);
@@ -1508,11 +1566,13 @@ private:
         validate->Bind(wxEVT_BUTTON, [this, picker](wxCommandEvent&) {
             ValidateModelRoot(picker->GetPath(), true);
         });
+#ifndef __EMSCRIPTEN__
         open->Bind(wxEVT_BUTTON, [picker](wxCommandEvent&) {
             if (!picker->GetPath().empty()) {
-                wxLaunchDefaultApplication(picker->GetPath());
+                OpenExternalPath(picker->GetPath(), picker);
             }
         });
+#endif
         save->Bind(wxEVT_BUTTON, [this, picker, &dialog](wxCommandEvent&) {
             if (!ValidateModelRoot(picker->GetPath(), false)) return;
             modelsRoot_ = picker->GetPath();
@@ -1539,7 +1599,7 @@ private:
 
     bool ValidateDictionaryFile(const wxString& path, bool mustExist) {
         if (path.empty() || !mustExist) return true;
-        if (!wxFileExists(path)) {
+        if (!IsRegularFile(path)) {
             wxMessageBox("Dictionary file does not exist:\n\n" + path,
                          "Missing dictionary", wxOK | wxICON_ERROR, this);
             return false;
@@ -1548,14 +1608,16 @@ private:
     }
 
     bool ValidateCommon() {
+#ifndef __EMSCRIPTEN__
         wxFileName toolName(ToolPath());
-        if (!toolName.IsAbsolute() || !wxFileExists(ToolPath())) {
+        if (!toolName.IsAbsolute() || !IsRegularFile(ToolPath())) {
             wxMessageBox(
                 "NeoLIP's internal backend helper is missing:\n\n" + ToolPath() +
                     "\n\nKeep neolip_backend beside NeoLIP, or reinstall NeoLIP.",
                 "Incomplete NeoLIP installation", wxOK | wxICON_ERROR, this);
             return false;
         }
+#endif
         return ValidateModelRootDetailed(false);
     }
 
@@ -1599,7 +1661,7 @@ private:
                                     !userDictPicker_->GetPath().empty())) {
             return;
         }
-        if (wavPicker_->GetPath().empty() || !wxFileExists(wavPicker_->GetPath())) {
+        if (wavPicker_->GetPath().empty() || !IsRegularFile(wavPicker_->GetPath())) {
             wxMessageBox("Select an existing WAV file.", "Missing WAV",
                          wxOK | wxICON_WARNING, this);
             return;
@@ -1611,7 +1673,7 @@ private:
                          "Missing transcript", wxOK | wxICON_WARNING, this);
             return;
         }
-        if (!textPicker_->GetPath().empty() && !wxFileExists(textPicker_->GetPath())) {
+        if (!textPicker_->GetPath().empty() && !IsRegularFile(textPicker_->GetPath())) {
             wxMessageBox("The selected transcript file does not exist.",
                          "Missing transcript", wxOK | wxICON_WARNING, this);
             return;
@@ -1710,11 +1772,11 @@ private:
         if (path.empty()) return;
         wxFileName fn(path);
         if (!fn.GetPath().empty()) wxFileName::Mkdir(fn.GetPath(), wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
-        if (!fn.FileExists()) {
+        if (!IsRegularFile(fn.GetFullPath())) {
             wxFFile f(path, "ab");
             if (f.IsOpened()) f.Close();
         }
-        wxLaunchDefaultApplication(path);
+        OpenExternalPath(path, this);
     }
 
     void OnOpenUnknownReport(wxCommandEvent&) { UpdateDictionaryDefaults(); OpenOrCreateTextFile(dictUnknownReportPicker_->GetPath()); }
@@ -1836,6 +1898,7 @@ private:
     }
 
     void StartCommand(const wxArrayString& args, bool batchCommand, int progressTotal = 0) {
+// Browser build uses the native route through neolip_wasm_runtime.
         if (process_) { wxMessageBox("A job is already running.", "Busy", wxOK | wxICON_INFORMATION, this); return; }
         RememberPaths();
         processCommand_ = JoinCommand(args);
@@ -1854,7 +1917,9 @@ private:
         progressGauge_->SetRange(progressTotal_ > 0 ? progressTotal_ : 100);
         progressGauge_->SetValue(0);
         progressLabel_->SetLabel(batchCommand && progressTotal_ > 0 ? wxString::Format("0 / %d", progressTotal_) : wxString("Running"));
+#ifndef __EMSCRIPTEN__
         stopButton_->Enable(true);
+#endif
         wxui::setStatusText(*this, "Running...");
         timer_.Start(100);
     }
@@ -1916,9 +1981,13 @@ private:
     void OnStop(wxCommandEvent&) { StopRunningProcess(true); }
 
     void StopRunningProcess(bool notify) {
+#ifndef __EMSCRIPTEN__
         if (!process_ || processPid_ == 0) return;
         const wxKillError rc = wxProcess::Kill(processPid_, wxSIGTERM, wxKILL_CHILDREN);
         if (notify) log_->AppendText(wxString::Format("\n[cancel requested, wxKill result %d]\n", static_cast<int>(rc)));
+#else
+        (void)notify;
+#endif
     }
 
     void OnClearLog(wxCommandEvent&) { log_->Clear(); }
@@ -1969,13 +2038,13 @@ private:
                     break;
             }
         }
-        if (!path.empty()) wxLaunchDefaultApplication(path);
+        if (!path.empty()) OpenExternalPath(path, this);
     }
 
     void OnOpenOutputFolder(wxCommandEvent&) {
         if (lipOutputPicker_->GetPath().empty()) return;
         const wxString path = wxFileName(lipOutputPicker_->GetPath()).GetPath();
-        if (!path.empty()) wxLaunchDefaultApplication(path);
+        if (!path.empty()) OpenExternalPath(path, this);
     }
 
     void UpdateLipGridRow(int row) {
@@ -2113,7 +2182,7 @@ private:
     }
 
     void LoadLipEditorPath(const wxString& path) {
-        if (path.empty() || !wxFileExists(path)) {
+        if (path.empty() || !IsRegularFile(path)) {
             wxMessageBox("Select an existing .lip file.", "Missing LIP",
                          wxOK | wxICON_WARNING, this);
             return;
@@ -2124,12 +2193,11 @@ private:
             timelineEntries_ = lipEditorEntries_;
             timelineLipDuration_ = duration;
             timelineLipPicker_->SetPath(path);
-            if (timelineSavePicker_->GetPath().empty()) {
-                timelineSavePicker_->SetPath(path);
-            }
+            timelineSavePicker_->SetPath(path);
+            lipEditorDirty_ = false;
 
             if (!timelineAudioPicker_->GetPath().empty() &&
-                wxFileExists(timelineAudioPicker_->GetPath())) {
+                IsRegularFile(timelineAudioPicker_->GetPath())) {
                 timelineWaveform_ =
                     LoadTimelineWaveformViaBackend(timelineAudioPicker_->GetPath());
             } else {
@@ -2150,34 +2218,44 @@ private:
     }
 
     void OpenLipFromGameDirectory(const std::filesystem::path& directory) {
-        wxFileDialog dialog(
-            this, "Open KotOR LIP", wxui::toWx(directory.u8string()),
-            wxEmptyString,
+        if (!ConfirmLipEditorChanges()) return;
+        wxui::requestOpenFile(
+            this,
+            "Open KotOR LIP",
             "KotOR LIP files (*.lip)|*.lip|All files (*.*)|*.*",
-            wxFD_OPEN | wxFD_FILE_MUST_EXIST);
-        if (dialog.ShowModal() == wxID_OK) {
-            LoadLipEditorPath(dialog.GetPath());
-        }
+            directory,
+            [this](std::optional<std::filesystem::path> selected) {
+                if (selected) LoadLipEditorPath(wxui::toWx(selected->u8string()));
+            });
     }
 
     void OnLoadLipEditor(wxCommandEvent&) {
-        LoadLipEditorPath(timelineLipPicker_->GetPath());
-    }
-
-    void OnSaveLipEditor(wxCommandEvent&) {
-        if (!SyncLipGridToEntries(true)) return;
-        timelineEntries_ = lipEditorEntries_;
-        wxString path = timelineSavePicker_->GetPath();
-        if (path.empty()) path = timelineLipPicker_->GetPath();
-        if (path.empty()) {
-            wxMessageBox("Choose a save path.", "Missing output",
-                         wxOK | wxICON_WARNING, this);
+        if (!ConfirmLipEditorChanges()) return;
+        const wxString current = timelineLipPicker_->GetPath();
+        if (IsRegularFile(current)) {
+            LoadLipEditorPath(current);
             return;
         }
+        wxui::requestOpenFile(
+            this,
+            "Open KotOR LIP",
+            "KotOR LIP files (*.lip)|*.lip|All files (*.*)|*.*",
+            [this](std::optional<std::filesystem::path> selected) {
+                if (selected) LoadLipEditorPath(wxui::toWx(selected->u8string()));
+            });
+    }
+
+    bool SaveLipEditorToPath(const wxString& path) {
+        if (!SyncLipGridToEntries(true)) return false;
+        timelineEntries_ = lipEditorEntries_;
         try {
             NormalizeVisibleLipEntries(lipEditorEntries_);
             timelineEntries_ = lipEditorEntries_;
             WriteVisibleLipEntries(path, lipEditorEntries_);
+#if defined(__EMSCRIPTEN__)
+            wxui::publishBrowserFile(
+                ToPath(path), wxui::toStd(wxFileName(path).GetFullName()));
+#endif
             timelineLipDuration_ = lipEditorEntries_.empty()
                 ? 0.0
                 : lipEditorEntries_.back().timeSeconds;
@@ -2187,14 +2265,63 @@ private:
             RefreshTimelinePanel();
             lastOutputPath_ = path;
             lastWorkDir_ = wxFileName(path).GetPath();
+            lipEditorDirty_ = false;
             log_->AppendText(wxString::Format(
                 "Saved KotOR LIP: %s\nvisible_keys\t%zu\n",
                 path, lipEditorEntries_.size()));
             wxui::setStatusText(*this, "Saved LIP");
+            return true;
         } catch (const std::exception& error) {
             wxMessageBox(wxString::Format("Could not save LIP: %s", error.what()),
                          "Save failed", wxOK | wxICON_ERROR, this);
+            return false;
         }
+    }
+
+    bool SaveLipEditor(bool saveAs) {
+        wxString path;
+        if (!saveAs) {
+            path = timelineSavePicker_->GetPath();
+            if (path.empty()) path = timelineLipPicker_->GetPath();
+        }
+        if (saveAs || path.empty()) {
+            wxString current = timelineSavePicker_->GetPath();
+            if (current.empty()) current = timelineLipPicker_->GetPath();
+            std::string defaultName = current.empty()
+                ? std::string("edited.lip")
+                : wxui::toStd(wxFileName(current).GetFullName());
+            const auto selected = wxui::chooseSaveFile(
+                this,
+                "Save KotOR LIP As",
+                "KotOR LIP files (*.lip)|*.lip|All files (*.*)|*.*",
+                defaultName);
+            if (!selected) return false;
+            path = wxui::toWx(selected->u8string());
+        }
+        return SaveLipEditorToPath(path);
+    }
+
+    bool ConfirmLipEditorChanges() {
+        if (!lipEditorDirty_) return true;
+        const int answer = wxMessageBox(
+            "The current LIP has unsaved changes. Save them before continuing?",
+            "Unsaved LIP",
+            wxYES_NO | wxCANCEL | wxICON_WARNING,
+            this);
+        if (answer == wxCANCEL) return false;
+        if (answer == wxNO) return true;
+        return SaveLipEditor(false);
+    }
+
+    void OnSaveLipEditor(wxCommandEvent&) { (void)SaveLipEditor(false); }
+    void OnSaveLipEditorAs(wxCommandEvent&) { (void)SaveLipEditor(true); }
+
+    void OnClose(wxCloseEvent& event) {
+        if (!ConfirmLipEditorChanges()) {
+            event.Veto();
+            return;
+        }
+        event.Skip();
     }
 
     void OnInsertLipKey(wxCommandEvent&) {
@@ -2217,6 +2344,7 @@ private:
             std::min<std::size_t>(static_cast<std::size_t>(insertAfter + 1),
                                   lipEditorEntries_.size());
         lipEditorEntries_.insert(position, entry);
+        lipEditorDirty_ = true;
         RefreshLipGrid();
         SyncEditorToTimeline();
     }
@@ -2230,6 +2358,7 @@ private:
                 lipEditorEntries_.erase(lipEditorEntries_.begin() + *it);
             }
         }
+        lipEditorDirty_ = true;
         RefreshLipGrid();
         SyncEditorToTimeline();
     }
@@ -2250,6 +2379,7 @@ private:
                 entry.timeSeconds = std::max(0.0, entry.timeSeconds + delta);
             }
         }
+        lipEditorDirty_ = true;
         RefreshLipGrid();
         SyncEditorToTimeline();
     }
@@ -2257,6 +2387,7 @@ private:
     void OnNormalizeLipKeys(wxCommandEvent&) {
         if (!SyncLipGridToEntries(true)) return;
         NormalizeVisibleLipEntries(lipEditorEntries_);
+        lipEditorDirty_ = true;
         RefreshLipGrid();
         SyncEditorToTimeline();
     }
@@ -2265,6 +2396,10 @@ private:
         try {
             return ReadSimpleWaveform(audioPath);
         } catch (...) {
+#ifdef __EMSCRIPTEN__
+            throw std::runtime_error(
+                "the browser build currently supports directly readable PCM WAV audio only");
+#else
             const wxString temporary =
                 CreateTimelineTempFile("neolip_timeline_decoded_");
             wxArrayString args;
@@ -2274,7 +2409,7 @@ private:
             args.Add(temporary);
             try {
                 const long result = ExecuteCommand(args, wxEXEC_SYNC);
-                if (result != 0 || !wxFileExists(temporary)) {
+                if (result != 0 || !IsRegularFile(temporary)) {
                     throw std::runtime_error(
                         "backend audio decoding failed; check the NeoLIP installation");
                 }
@@ -2285,6 +2420,7 @@ private:
                 RemoveFileBestEffort(temporary);
                 throw;
             }
+#endif
         }
     }
 
@@ -2295,7 +2431,7 @@ private:
             RefreshTimelinePanel();
             return;
         }
-        if (!wxFileExists(path)) {
+        if (!IsRegularFile(path)) {
             wxMessageBox("The selected audio file does not exist.", "Missing audio",
                          wxOK | wxICON_WARNING, this);
             return;
@@ -2355,6 +2491,7 @@ private:
         if (timelinePanel_ == nullptr || timelineShapeChoice_ == nullptr) return;
         timelinePanel_->SetSelectedShape(timelineShapeChoice_->GetSelection());
         SyncTimelineToEditor();
+        lipEditorDirty_ = true;
     }
 
     void OnTimelineZoomChanged(wxCommandEvent&) {
@@ -2364,6 +2501,7 @@ private:
     }
 
     void OnTimelinePlayCursor(wxCommandEvent&) {
+// Browser build uses the native route through neolip_wasm_runtime.
         if (!timelinePanel_) return;
         const auto& wf = timelinePanel_->Waveform();
         if (wf.mono.empty() || wf.sampleRate <= 0) { wxMessageBox("Load an audio waveform before playback.", "No audio", wxOK | wxICON_INFORMATION, this); return; }
@@ -2377,7 +2515,7 @@ private:
             WritePcm16WavGui(tmp, wf, timelinePanel_->CursorSeconds(), 8.0);
             timelineSound_ = std::make_unique<wxSound>(tmp);
             timelinePreviewPath_ = tmp;
-            if (!timelineSound_->IsOk()) { wxLaunchDefaultApplication(tmp); return; }
+            if (!timelineSound_->IsOk()) { OpenExternalPath(tmp, this); return; }
             timelineSound_->Play(wxSOUND_ASYNC);
             log_->AppendText(wxString::Format("Playback preview from %.3fs\n", timelinePanel_->CursorSeconds()));
         } catch (const std::exception& e) {

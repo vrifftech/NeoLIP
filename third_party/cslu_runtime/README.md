@@ -12,4 +12,4 @@ third_party/cslu_runtime/Toolkit/2.0/apps/fa
 
 Do not remove this directory from source distributions intended to produce a self-contained NeoLIP runtime without a separate CSLU Toolkit installation.
 
-Preserve `docs/THIRD_PARTY_NOTICES.md` and `docs/licenses/` when redistributing builds that include these assets.
+Preserve the applicable license files when redistributing builds that include these assets.

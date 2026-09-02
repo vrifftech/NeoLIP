@@ -126,25 +126,71 @@ BUILD_ARGS=(--build "$BUILD_DIR" --config "$BUILD_TYPE")
 printf 'Building %s\n' "$PROJECT_NAME"
 "$CMAKE_BIN" "${BUILD_ARGS[@]}"
 
+first_existing_file() {
+  local candidate
+  for candidate in "$@"; do
+    if [[ -f "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
 if [[ "$BUILD_WX" == "ON" && ( -z "$TARGET" || "$TARGET" == "NeoLIP" ) ]]; then
-  GUI_PATH=""
-  while IFS= read -r candidate; do
-    GUI_PATH="$candidate"
-    break
-  done < <(find "$BUILD_DIR" -maxdepth 3 -type f \( -name NeoLIP -o -name NeoLIP.exe \) -print 2>/dev/null)
+  # CMake places a MACOSX_BUNDLE executable below
+  # NeoLIP.app/Contents/MacOS, which is deeper than an ordinary native target.
+  # Check the standard single- and multi-config output locations explicitly,
+  # then retain a recursive fallback for custom generators/output directories.
+  GUI_PATH="$(
+    first_existing_file \
+      "$BUILD_DIR/NeoLIP.app/Contents/MacOS/NeoLIP" \
+      "$BUILD_DIR/$BUILD_TYPE/NeoLIP.app/Contents/MacOS/NeoLIP" \
+      "$BUILD_DIR/NeoLIP" \
+      "$BUILD_DIR/NeoLIP.exe" \
+      "$BUILD_DIR/$BUILD_TYPE/NeoLIP" \
+      "$BUILD_DIR/$BUILD_TYPE/NeoLIP.exe" \
+      || true
+  )"
+  if [[ -z "$GUI_PATH" ]]; then
+    while IFS= read -r candidate; do
+      GUI_PATH="$candidate"
+      break
+    done < <(
+      find "$BUILD_DIR" -type f \
+        \( -path '*/NeoLIP.app/Contents/MacOS/NeoLIP' -o -name NeoLIP -o -name NeoLIP.exe \) \
+        -print 2>/dev/null
+    )
+  fi
 
   if [[ -z "$GUI_PATH" ]]; then
-    echo "NeoLIP GUI was requested, but no NeoLIP executable was produced." >&2
+    echo "NeoLIP GUI was requested, but no NeoLIP executable was produced under: $BUILD_DIR" >&2
     exit 1
   fi
-  BACKEND_PATH=""
-  while IFS= read -r candidate; do
-    BACKEND_PATH="$candidate"
-    break
-  done < <(find "$BUILD_DIR" -maxdepth 3 -type f \( -name neolip_backend -o -name neolip_backend.exe \) -print 2>/dev/null)
+
+  BACKEND_PATH="$(
+    first_existing_file \
+      "$BUILD_DIR/neolip_backend" \
+      "$BUILD_DIR/neolip_backend.exe" \
+      "$BUILD_DIR/$BUILD_TYPE/neolip_backend" \
+      "$BUILD_DIR/$BUILD_TYPE/neolip_backend.exe" \
+      "$BUILD_DIR/NeoLIP.app/Contents/MacOS/neolip_backend" \
+      "$BUILD_DIR/$BUILD_TYPE/NeoLIP.app/Contents/MacOS/neolip_backend" \
+      || true
+  )"
+  if [[ -z "$BACKEND_PATH" ]]; then
+    while IFS= read -r candidate; do
+      BACKEND_PATH="$candidate"
+      break
+    done < <(
+      find "$BUILD_DIR" -type f \
+        \( -name neolip_backend -o -name neolip_backend.exe \) \
+        -print 2>/dev/null
+    )
+  fi
 
   if [[ -z "$BACKEND_PATH" ]]; then
-    echo "NeoLIP was built without its required backend helper." >&2
+    echo "NeoLIP was built without its required backend helper under: $BUILD_DIR" >&2
     exit 1
   fi
 

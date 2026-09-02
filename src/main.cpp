@@ -24,13 +24,16 @@
 #include <fstream>
 #include <future>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <mutex>
 #include <set>
 #include <stdexcept>
 #include <sstream>
 #include <string>
+#if !defined(__EMSCRIPTEN__)
 #include <thread>
+#endif
 #include <vector>
 
 #if defined(_WIN32)
@@ -44,8 +47,6 @@
 #elif defined(__linux__)
 #include <unistd.h>
 #include <limits.h>
-
-#include <neolip_wasm_runtime.h>
 #endif
 
 namespace fs = std::filesystem;
@@ -3905,11 +3906,39 @@ static std::string hexSizeTLocal(std::size_t v) {
     return ss.str();
 }
 
+template <typename Integer>
+static std::string decimalIntegerLocal(Integer value) {
+    static_assert(std::numeric_limits<Integer>::is_integer,
+                  "NeoLIP cache timestamps require an integral clock representation.");
+
+    const bool negative = [] (Integer candidate) {
+        if constexpr (std::numeric_limits<Integer>::is_signed) {
+            return candidate < 0;
+        }
+        return false;
+    }(value);
+
+    std::string encoded;
+    do {
+        const Integer quotient = value / static_cast<Integer>(10);
+        Integer remainder = value % static_cast<Integer>(10);
+        int digit = static_cast<int>(remainder);
+        if (digit < 0) digit = -digit;
+        encoded.push_back(static_cast<char>('0' + digit));
+        value = quotient;
+    } while (value != 0);
+
+    if (negative) encoded.push_back('-');
+    std::reverse(encoded.begin(), encoded.end());
+    return encoded;
+}
+
 static fs::path cachedDecodePathFor(const fs::path& input, const fs::path& cacheDir) {
     std::error_code ec;
     const auto size = fs::file_size(input, ec);
-    const auto t = fs::last_write_time(input, ec).time_since_epoch().count();
-    const std::string keySource = input.lexically_normal().generic_string() + "|" + std::to_string(size) + "|" + std::to_string(t);
+    const auto timestamp = fs::last_write_time(input, ec).time_since_epoch().count();
+    const std::string keySource = input.lexically_normal().generic_string() + "|" +
+        std::to_string(size) + "|" + decimalIntegerLocal(timestamp);
     const std::size_t h = std::hash<std::string>{}(keySource);
     std::string name = input.stem().string();
     for (char& ch : name) {
@@ -3963,10 +3992,18 @@ static bool batchCancellationRequested(const BatchAlignOptions& opt) {
 
 static int resolveBatchJobCount(int requested, std::size_t itemCount) {
     if (itemCount == 0) return 1;
+#if defined(__EMSCRIPTEN__)
+    // The browser build intentionally does not enable pthreads. Run the batch
+    // worker on the calling thread instead of depending on a synthetic thread
+    // type that can leak into native builds.
+    (void)requested;
+    return 1;
+#else
     if (requested > 0) return std::max(1, requested);
-    unsigned hw = ::neolip::wasm::Thread::hardware_concurrency();
+    unsigned hw = std::thread::hardware_concurrency();
     if (hw == 0) hw = 2;
     return static_cast<int>(std::max<std::size_t>(1, std::min<std::size_t>({itemCount, static_cast<std::size_t>(hw), 4})));
+#endif
 }
 
 static BatchItemResult processOneBatchItem(const fs::path& wav,
@@ -4271,10 +4308,14 @@ static int cmdBatchAlign(const std::vector<std::string>& args) {
         }
     };
 
-    std::vector<::neolip::wasm::Thread> threads;
+#if defined(__EMSCRIPTEN__)
+    worker();
+#else
+    std::vector<std::thread> threads;
     threads.reserve(static_cast<std::size_t>(jobs));
     for (int j = 0; j < jobs; ++j) threads.emplace_back(worker);
     for (auto& t : threads) t.join();
+#endif
 
     // Mark items that were never started after a cancel/fail-fast request so the
     // partial report is explicit and resume can be used cleanly later.

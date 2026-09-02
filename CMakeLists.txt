@@ -371,8 +371,6 @@ if(NEOLIP_BUILD_WX_GUI)
         install(DIRECTORY dictionaries/
             DESTINATION "${NEOLIP_DATA_PREFIX}dictionaries"
             FILES_MATCHING PATTERN "*.dict")
-        install(DIRECTORY docs/attribution/
-            DESTINATION "${NEOLIP_DATA_PREFIX}docs/attribution")
         install(FILES
             "${NEOLIP_CSLU_FA_DIR}/phonemes_new_16k.train.spec"
             "${NEOLIP_CSLU_FA_DIR}/phonemes_new_16k.parts"

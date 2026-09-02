@@ -165,7 +165,13 @@ long ExecuteCommand(const wxArrayString& args,
     const ExecuteArguments argv(args);
     return wxExecute(argv.data(), flags, process);
 }
-
+#else
+long ExecuteCommand(const wxArrayString& args,
+                    int flags,
+                    wxProcess* process = nullptr) {
+    if (args.empty()) return 0;
+    return wxExecute(args, flags, process);
+}
 #endif
 
 fs::path ToPath(const wxString& path) {
@@ -190,6 +196,7 @@ void RemoveFileBestEffort(const wxString& path) {
 }
 
 void OpenExternalPath(const wxString& path, wxWindow* parent = nullptr) {
+    (void)parent;
     if (path.empty()) return;
 // Browser build uses the native route through neolip_wasm_runtime.
     wxLaunchDefaultApplication(path);

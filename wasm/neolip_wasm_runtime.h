@@ -1,39 +1,5 @@
 #pragma once
 
-#include <functional>
-#include <thread>
-#include <utility>
-
-namespace neolip::wasm {
-
-// Keeps the native backend's worker abstraction intact while avoiding pthreads
-// on GitHub Pages, where cross-origin isolation cannot be assumed.
-#if defined(__EMSCRIPTEN__)
-class Thread final {
-public:
-    Thread() noexcept = default;
-
-    template <class Function, class... Args>
-    explicit Thread(Function&& function, Args&&... args) {
-        std::invoke(std::forward<Function>(function), std::forward<Args>(args)...);
-    }
-
-    Thread(Thread&&) noexcept = default;
-    Thread& operator=(Thread&&) noexcept = default;
-    Thread(const Thread&) = delete;
-    Thread& operator=(const Thread&) = delete;
-
-    bool joinable() const noexcept { return false; }
-    void join() noexcept {}
-    void detach() noexcept {}
-    static unsigned hardware_concurrency() noexcept { return 1U; }
-};
-#else
-using Thread = std::thread;
-#endif
-
-}  // namespace neolip::wasm
-
 #if defined(__EMSCRIPTEN__)
 
 #include <wx/arrstr.h>

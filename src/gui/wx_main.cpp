@@ -1278,9 +1278,11 @@ private:
 
         wxString savedDict = config.Read("user_dict", wxEmptyString);
         const wxString bundledDictionaryRoot = DefaultDictionaryRoot();
-        const wxString bundledKotor = bundledDictionaryRoot.empty()
-            ? wxEmptyString
-            : wxFileName(bundledDictionaryRoot, "kotor_override.dict").GetFullPath();
+        wxString bundledKotor;
+        if (!bundledDictionaryRoot.empty()) {
+            bundledKotor = wxFileName(
+                bundledDictionaryRoot, "kotor_override.dict").GetFullPath();
+        }
         // Older NeoLIP builds exposed the bundled KOTOR dictionary as though it
         // were a user override. It is now loaded automatically as a package
         // layer, so migrate that stale preference back to an empty user field.
@@ -1542,7 +1544,8 @@ private:
         for (const wxString& path : normalized) {
             if (IsDirectory(path)) return path;
         }
-        return normalized.empty() ? wxEmptyString : normalized[0];
+        if (normalized.empty()) return wxString{};
+        return normalized[0];
     }
 
     wxString DictionaryRoot() const {

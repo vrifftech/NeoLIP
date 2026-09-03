@@ -162,8 +162,16 @@ long ExecuteCommand(const wxArrayString& args,
                     int flags,
                     wxProcess* process = nullptr) {
     if (args.empty()) return 0;
+#ifdef __WXMSW__
+    // wxWidgets reconstructs a Windows command line from argv but does not
+    // preserve the required backslash-before-closing-quote rule for paths that
+    // contain spaces. NeoLIP's QuoteArg() implements the Windows CRT rules, so
+    // pass the completed command line directly to CreateProcess via wxExecute.
+    return wxExecute(JoinCommand(args), flags, process);
+#else
     const ExecuteArguments argv(args);
     return wxExecute(argv.data(), flags, process);
+#endif
 }
 #else
 long ExecuteCommand(const wxArrayString& args,
@@ -182,6 +190,25 @@ bool IsRegularFile(const wxString& path) {
     if (path.empty()) return false;
     std::error_code error;
     return fs::is_regular_file(ToPath(path), error);
+}
+
+bool IsDirectory(const wxString& path) {
+    if (path.empty()) return false;
+    std::error_code error;
+    return fs::is_directory(ToPath(path), error);
+}
+
+bool SamePath(const wxString& left, const wxString& right) {
+    if (left.empty() || right.empty()) return false;
+    wxFileName lhs(left);
+    wxFileName rhs(right);
+    lhs.Normalize(wxPATH_NORM_DOTS | wxPATH_NORM_ABSOLUTE);
+    rhs.Normalize(wxPATH_NORM_DOTS | wxPATH_NORM_ABSOLUTE);
+#ifdef __WXMSW__
+    return lhs.GetFullPath().CmpNoCase(rhs.GetFullPath()) == 0;
+#else
+    return lhs.GetFullPath() == rhs.GetFullPath();
+#endif
 }
 
 wxString CreateTimelineTempFile(const wxString& prefix) {
@@ -214,49 +241,6 @@ wxString DefaultToolPath() {
     return toolName;
 }
 
-
-wxString ExistingFileFromCandidates(const wxArrayString& candidates) {
-    for (const auto& c : candidates) {
-        if (!c.empty() && IsRegularFile(c)) return c;
-    }
-    return wxEmptyString;
-}
-
-wxString DefaultKotorOverridePath(const wxString& toolPath, const wxString& modelRoot) {
-    const wxString sep(wxFileName::GetPathSeparator());
-    wxArrayString candidates;
-
-    if (!modelRoot.empty()) {
-        candidates.Add(modelRoot + sep + "dictionaries" + sep + "kotor_override.dict");
-        wxFileName modelRootName(modelRoot, "");
-        const wxString parent = modelRootName.GetPath();
-        if (!parent.empty()) {
-            candidates.Add(parent + sep + "dictionaries" + sep + "kotor_override.dict");
-        }
-    }
-
-    if (!toolPath.empty()) {
-        wxFileName tool(toolPath);
-        const wxString binDir = tool.GetPath();
-        if (!binDir.empty()) {
-            candidates.Add(binDir + sep + "dictionaries" + sep + "kotor_override.dict");
-            wxFileName fromAppResources(binDir + sep + ".." + sep + "Resources" + sep +
-                                        "dictionaries" + sep + "kotor_override.dict");
-            fromAppResources.Normalize(wxPATH_NORM_DOTS | wxPATH_NORM_ABSOLUTE);
-            candidates.Add(fromAppResources.GetFullPath());
-            wxFileName fromPackage(binDir + sep + ".." + sep + "dictionaries" + sep + "kotor_override.dict");
-            fromPackage.Normalize(wxPATH_NORM_DOTS | wxPATH_NORM_ABSOLUTE);
-            candidates.Add(fromPackage.GetFullPath());
-        }
-    }
-
-    wxFileName exe(wxStandardPaths::Get().GetExecutablePath());
-    wxFileName fromExePackage(exe.GetPath() + sep + ".." + sep + "dictionaries" + sep + "kotor_override.dict");
-    fromExePackage.Normalize(wxPATH_NORM_DOTS | wxPATH_NORM_ABSOLUTE);
-    candidates.Add(fromExePackage.GetFullPath());
-
-    return ExistingFileFromCandidates(candidates);
-}
 
 
 wxString DefaultWorkDirForOutput(const wxString& outputPath) {
@@ -1292,12 +1276,19 @@ private:
         modelsRoot_ = config.Read("models_root", wxEmptyString);
         if (modelsRoot_.empty()) modelsRoot_ = DefaultModelRoot();
 
-        const wxString savedDict = config.Read("user_dict", wxEmptyString);
+        wxString savedDict = config.Read("user_dict", wxEmptyString);
+        const wxString bundledDictionaryRoot = DefaultDictionaryRoot();
+        const wxString bundledKotor = bundledDictionaryRoot.empty()
+            ? wxEmptyString
+            : wxFileName(bundledDictionaryRoot, "kotor_override.dict").GetFullPath();
+        // Older NeoLIP builds exposed the bundled KOTOR dictionary as though it
+        // were a user override. It is now loaded automatically as a package
+        // layer, so migrate that stale preference back to an empty user field.
+        if (SamePath(savedDict, bundledKotor)) savedDict.clear();
         userDictPicker_->SetPath(savedDict);
         batchUserDictPicker_->SetPath(savedDict);
         dictOverrideDictPicker_->SetPath(savedDict);
         lookupUserDictPicker_->SetPath(savedDict);
-        ApplyDefaultKotorOverrideIfAvailable();
 
         const bool useOgi = config.ReadBool("use_ogi", true);
         useOgi_->SetValue(useOgi);
@@ -1474,21 +1465,116 @@ private:
         return modelsRoot_;
     }
 
-    void ApplyDefaultKotorOverrideIfAvailable() {
-        const wxString dict = DefaultKotorOverridePath(ToolPath(), ModelRoot());
-        if (dict.empty()) return;
-        if (userDictPicker_ != nullptr && userDictPicker_->GetPath().empty()) {
-            userDictPicker_->SetPath(dict);
+    std::vector<wxString> RequiredDictionaryFiles(const wxString& root) const {
+        const wxString sep(wxFileName::GetPathSeparator());
+        std::vector<wxString> files = {
+            root + sep + "custom_dictionary.txt",
+            root + sep + "ogi_lex.out",
+            root + sep + "ogi_lex_addenda.scm",
+            root + sep + "kotor_override.dict"
+        };
+        for (char letter = 'a'; letter <= 'z'; ++letter) {
+            files.push_back(root + sep + "cmu" + sep +
+                            wxString::Format("%c.ob", letter));
         }
-        if (batchUserDictPicker_ != nullptr && batchUserDictPicker_->GetPath().empty()) {
-            batchUserDictPicker_->SetPath(dict);
+        return files;
+    }
+
+    bool DictionaryRootIsComplete(const wxString& root) const {
+        if (root.empty() || !IsDirectory(root)) return false;
+        for (const wxString& path : RequiredDictionaryFiles(root)) {
+            if (!IsRegularFile(path)) return false;
         }
-        if (dictOverrideDictPicker_ != nullptr && dictOverrideDictPicker_->GetPath().empty()) {
-            dictOverrideDictPicker_->SetPath(dict);
+        return true;
+    }
+
+    wxString DefaultDictionaryRoot() const {
+#ifdef __EMSCRIPTEN__
+        if (DictionaryRootIsComplete("/dictionaries")) return "/dictionaries";
+#endif
+        const wxString sep(wxFileName::GetPathSeparator());
+        wxArrayString candidates;
+
+        if (!ModelRoot().empty()) {
+            candidates.Add(ModelRoot() + sep + ".." + sep + "dictionaries");
+            candidates.Add(ModelRoot() + sep + "dictionaries");
         }
-        if (lookupUserDictPicker_ != nullptr && lookupUserDictPicker_->GetPath().empty()) {
-            lookupUserDictPicker_->SetPath(dict);
+
+        const wxString toolPath = ToolPath();
+        if (!toolPath.empty()) {
+            const wxString toolDir = wxFileName(toolPath).GetPath();
+            if (!toolDir.empty()) {
+                candidates.Add(toolDir + sep + "dictionaries");
+                candidates.Add(toolDir + sep + ".." + sep + "dictionaries");
+                candidates.Add(toolDir + sep + ".." + sep + "Resources" + sep + "dictionaries");
+                candidates.Add(toolDir + sep + ".." + sep + ".." + sep + "dictionaries");
+            }
         }
+
+        wxFileName executable(wxStandardPaths::Get().GetExecutablePath());
+        const wxString executableDir = executable.GetPath();
+        candidates.Add(executableDir + sep + "dictionaries");
+        candidates.Add(executableDir + sep + ".." + sep + "dictionaries");
+        candidates.Add(executableDir + sep + ".." + sep + "Resources" + sep + "dictionaries");
+        candidates.Add(executableDir + sep + ".." + sep + ".." + sep + "dictionaries");
+
+        wxArrayString normalized;
+        for (const wxString& raw : candidates) {
+            if (raw.empty()) continue;
+            wxFileName root(raw, "");
+            root.Normalize(wxPATH_NORM_DOTS | wxPATH_NORM_ABSOLUTE);
+            const wxString path = root.GetFullPath();
+            bool duplicate = false;
+            for (const wxString& existing : normalized) {
+                if (SamePath(path, existing)) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (!duplicate) normalized.Add(path);
+        }
+
+        for (const wxString& path : normalized) {
+            if (DictionaryRootIsComplete(path)) return path;
+        }
+        // Return an existing but incomplete candidate so validation can identify
+        // every missing file rather than reporting only "not found".
+        for (const wxString& path : normalized) {
+            if (IsDirectory(path)) return path;
+        }
+        return normalized.empty() ? wxEmptyString : normalized[0];
+    }
+
+    wxString DictionaryRoot() const {
+        return DefaultDictionaryRoot();
+    }
+
+    bool ValidateDictionaryRoot(const wxString& root, bool showSuccess) {
+        if (root.empty()) {
+            wxMessageBox(
+                "NeoLIP's bundled pronunciation dictionaries could not be located.\n\n"
+                "Reinstall NeoLIP; the dictionaries folder must be packaged beside the models folder.",
+                "Dictionaries not found", wxOK | wxICON_ERROR, this);
+            return false;
+        }
+
+        wxString missing;
+        for (const wxString& path : RequiredDictionaryFiles(root)) {
+            if (!IsRegularFile(path)) missing += "  " + path + "\n";
+        }
+        if (!missing.empty()) {
+            wxMessageBox(
+                "NeoLIP's bundled pronunciation dictionary set is incomplete:\n\n" + missing +
+                    "\nReinstall NeoLIP. The package must contain the CSLU custom dictionary, "
+                    "all 26 CMU dictionary files, the OGI lexicon and addenda, and the KOTOR override.",
+                "Incomplete dictionaries", wxOK | wxICON_ERROR, this);
+            return false;
+        }
+        if (showSuccess) {
+            wxMessageBox("The bundled pronunciation dictionaries are valid.",
+                         "Dictionaries", wxOK | wxICON_INFORMATION, this);
+        }
+        return true;
     }
 
     std::vector<wxString> RequiredModelFiles(const wxString& root) const {
@@ -1583,7 +1669,6 @@ private:
         save->Bind(wxEVT_BUTTON, [this, picker, &dialog](wxCommandEvent&) {
             if (!ValidateModelRoot(picker->GetPath(), false)) return;
             modelsRoot_ = picker->GetPath();
-            ApplyDefaultKotorOverrideIfAvailable();
             SaveConfig();
             dialog.EndModal(wxID_OK);
         });
@@ -1625,7 +1710,8 @@ private:
             return false;
         }
 #endif
-        return ValidateModelRootDetailed(false);
+        if (!ValidateModelRootDetailed(false)) return false;
+        return ValidateDictionaryRoot(DictionaryRoot(), false);
     }
 
     void AddModelsFlag(wxArrayString& args) const {
@@ -1639,6 +1725,8 @@ private:
                          const wxString& unknownReport = wxEmptyString) {
         args.Add("--mode");
         args.Add(mode.empty() ? wxString("simple") : mode);
+        args.Add("--dict-root");
+        args.Add(DictionaryRoot());
         if (!userDict.empty()) {
             args.Add("--override-dict");
             args.Add(userDict);
@@ -1874,6 +1962,8 @@ private:
         args.Add("lookup-word");
         args.Add(word);
         AddModelsFlag(args);
+        args.Add("--dict-root");
+        args.Add(DictionaryRoot());
         if (!lookupUserDictPicker_->GetPath().empty()) {
             args.Add("--override-dict");
             args.Add(lookupUserDictPicker_->GetPath());

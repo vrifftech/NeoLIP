@@ -79,6 +79,12 @@ jobs:
             --jobs 2 \
             --clean
 
+      - name: Validate packaged pronunciation dictionaries
+        run: |
+          APP="tool/stage-macos-${{ matrix.arch }}/NeoLIP.app"
+          test -x "$APP/Contents/MacOS/neolip_backend"
+          "$APP/Contents/MacOS/neolip_backend" validate-package "$APP/Contents/Resources"
+
       - name: Verify package checksum
         run: |
           cd tool/dist

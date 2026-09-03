@@ -82,6 +82,7 @@ jobs:
           test -d tool/stage/models
           test -d tool/stage/dictionaries
           file tool/stage/bin/NeoLIP tool/stage/bin/neolip_backend
+          tool/stage/bin/neolip_backend validate-package tool/stage
 
       - name: Bundle the matching wxWidgets runtime
         run: bash tool/scripts/bundle-linux-wx.sh tool/stage
@@ -185,6 +186,10 @@ jobs:
             if (-not (Test-Path -LiteralPath $path)) {
               throw "NeoLIP package is missing required output: $path"
             }
+          }
+          & 'tool\stage\neolip_backend.exe' validate-package 'tool\stage'
+          if ($LASTEXITCODE -ne 0) {
+            throw "NeoLIP's packaged dictionary smoke test failed with exit code $LASTEXITCODE"
           }
           Get-ChildItem -LiteralPath 'tool\stage' | Format-Table Name, Length
 

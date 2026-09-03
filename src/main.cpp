@@ -235,11 +235,13 @@ Internal commands:
 
   text-to-ntp <input.txt-or-literal-text> <output.ntp> --models <models_dir> [text flags]
       Generate an .ntp phone transcript from text. The default mode is simple.
-      Useful text flags: --mode simple|cslu, --dict built_in_or_custom.txt,
-      --override-dict overrides.txt, --use-ogi, --no-ogi, --ogi-lex ogi_lex.out,
+      Useful text flags: --mode simple|cslu, --dict-root dictionaries_dir,
+      --dict built_in_or_custom.txt, --override-dict additional_overrides.txt,
+      --use-ogi, --no-ogi, --ogi-lex ogi_lex.out,
       --ogi-addenda ogi_lex_addenda.scm, --source-report report.tsv,
-      --unknown-report unknown.tsv. OGI/Festival lexicon fallback is enabled by default
-      when the files are present. TLK cleanup is enabled by default; add
+      --unknown-report unknown.tsv. Standalone NeoLIP dictionary roots include the
+      CSLU custom/CMU/OGI sources plus the built-in KOTOR override. OGI/Festival
+      fallback is enabled by default. TLK cleanup is enabled by default; add
       --no-tlk-cleanup to preserve bracket/brace markup, or --keep-stage-directions
       to preserve text inside {...} while still removing the braces.
 
@@ -2748,6 +2750,20 @@ static void applyStandaloneDictionaryRoot(TextToNtpOptions& opts, const fs::path
     opts.cmuDictionaryDir = dictRoot / "cmu";
     opts.ogiLexiconPath = dictRoot / "ogi_lex.out";
     opts.ogiAddendaPath = dictRoot / "ogi_lex_addenda.scm";
+
+    // The KOTOR pronunciation layer is part of every standalone NeoLIP
+    // dictionary bundle. Keep it separate from optional user overrides so the
+    // package works without requiring the user to select an internal file.
+    const fs::path kotorOverride = dictRoot / "kotor_override.dict";
+    const fs::path normalized = kotorOverride.lexically_normal();
+    const auto duplicate = std::find_if(
+        opts.overrideDictionaries.begin(), opts.overrideDictionaries.end(),
+        [&](const fs::path& existing) {
+            return existing.lexically_normal() == normalized;
+        });
+    if (duplicate == opts.overrideDictionaries.end()) {
+        opts.overrideDictionaries.push_back(kotorOverride);
+    }
 }
 
 static TextToNtpOptions retargetTextOptionsPreservingFlags(const TextToNtpOptions& current,
@@ -4574,6 +4590,27 @@ static int cmdValidatePackage(const std::vector<std::string>& args) {
     std::cout << "resolved_cmu_dictionary_dir\t" << opts.cmuDictionaryDir.string() << "\n";
     std::cout << "resolved_ogi_lexicon\t" << opts.ogiLexiconPath.string() << "\n";
     std::cout << "resolved_ogi_addenda\t" << opts.ogiAddendaPath.string() << "\n";
+
+    // Exercise every packaged dictionary layer instead of accepting a directory
+    // that merely contains files with the expected names. The sentence includes
+    // common words from the CSLU custom/CMU/OGI sources and Bogga from NeoLIP's
+    // KOTOR override.
+    try {
+        opts.failOnUnknown = false;
+        const TextToNtpResult smoke = textToNtpFromSource(
+            "Why hello there welcome to the domain of Bogga the Hutt, how may one serve you today.",
+            opts);
+        std::cout << "dictionary_smoke_words\t" << smoke.words.size() << "\n";
+        std::cout << "dictionary_smoke_unknown\t" << smoke.unknownWords.size() << "\n";
+        for (const auto& word : smoke.unknownWords) {
+            std::cout << "dictionary_smoke_unknown_word\t" << word << "\n";
+        }
+        if (!smoke.unknownWords.empty()) ++missing;
+    } catch (const std::exception& error) {
+        std::cout << "dictionary_smoke_error\t" << error.what() << "\n";
+        ++missing;
+    }
+
     std::cout << "missing_assets\t" << missing << "\n";
     std::cout << "verdict\t" << (missing == 0 ? "PASS" : "MISSING_ASSETS") << "\n";
     return missing == 0 ? 0 : 1;

@@ -128,6 +128,35 @@ neo_apply_minimal_release(neolip_core)
 # Core-only configurations must not produce an asset-only package.
 set(NEOLIP_CSLU_RUNTIME_DIR "${CMAKE_CURRENT_LIST_DIR}/third_party/cslu_runtime")
 set(NEOLIP_CSLU_FA_DIR "${NEOLIP_CSLU_RUNTIME_DIR}/Toolkit/2.0/apps/fa")
+set(NEOLIP_CSLU_CMU_DIR "${NEOLIP_CSLU_RUNTIME_DIR}/Toolkit/2.0/script/dictionary_1.0/cmu")
+set(NEOLIP_CSLU_OGI_LEXICON "${NEOLIP_CSLU_RUNTIME_DIR}/Festival/1.4.2/festival/lib/dicts/ogi_lex.out")
+set(NEOLIP_CSLU_OGI_ADDENDA "${NEOLIP_CSLU_RUNTIME_DIR}/Festival/1.4.2/festival/lib/ogi_lex_addenda.scm")
+set(NEOLIP_BUNDLED_DICTIONARY_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/dictionaries")
+set(NEOLIP_BUNDLED_CMU_DIR "${NEOLIP_BUNDLED_DICTIONARY_ROOT}/cmu")
+set(NEOLIP_BUNDLED_OGI_LEXICON "${NEOLIP_BUNDLED_DICTIONARY_ROOT}/ogi_lex.out")
+set(NEOLIP_BUNDLED_OGI_ADDENDA "${NEOLIP_BUNDLED_DICTIONARY_ROOT}/ogi_lex_addenda.scm")
+
+# The text aligner must never configure successfully with a partial dictionary
+# bundle: missing data otherwise appears later as every transcript word being
+# unknown. These are the pronunciation assets from the supplied CSLU Toolkit,
+# augmented by NeoLIP's KOTOR-specific override.
+set(NEOLIP_REQUIRED_DICTIONARY_ASSETS
+    "${NEOLIP_BUNDLED_DICTIONARY_ROOT}/custom_dictionary.txt"
+    "${NEOLIP_BUNDLED_OGI_LEXICON}"
+    "${NEOLIP_BUNDLED_OGI_ADDENDA}"
+    "${NEOLIP_BUNDLED_DICTIONARY_ROOT}/kotor_override.dict"
+)
+foreach(_neolip_letter IN ITEMS a b c d e f g h i j k l m n o p q r s t u v w x y z)
+    list(APPEND NEOLIP_REQUIRED_DICTIONARY_ASSETS
+        "${NEOLIP_BUNDLED_CMU_DIR}/${_neolip_letter}.ob")
+endforeach()
+foreach(_neolip_dictionary_asset IN LISTS NEOLIP_REQUIRED_DICTIONARY_ASSETS)
+    if(NOT EXISTS "${_neolip_dictionary_asset}")
+        message(FATAL_ERROR
+            "NeoLIP's pronunciation dictionary bundle is incomplete: "
+            "${_neolip_dictionary_asset}")
+    endif()
+endforeach()
 
 # Direct Windows wxWidgets variables. These remain available for source-built wxWidgets trees.
 set(NEOLIP_WX_ROOT_DIR "" CACHE PATH "Root of an installed wxWidgets tree, for example C:/wxWidgets-3.2.6")
@@ -306,15 +335,11 @@ if(NEOLIP_BUILD_WX_GUI)
             SLUG "neolip"
             ICON "${CMAKE_CURRENT_SOURCE_DIR}/resources/neolip.svg"
             PRELOAD
-                "${CMAKE_CURRENT_SOURCE_DIR}/dictionaries@/dictionaries"
+                "${NEOLIP_BUNDLED_DICTIONARY_ROOT}@/dictionaries"
                 "${NEOLIP_CSLU_FA_DIR}/phonemes_new_16k.train.spec@/models/phonemes_new_16k.train.spec"
                 "${NEOLIP_CSLU_FA_DIR}/phonemes_new_16k.parts@/models/phonemes_new_16k.parts"
                 "${NEOLIP_CSLU_FA_DIR}/bc_16k@/models/bc_16k"
                 "${NEOLIP_CSLU_FA_DIR}/trans_16k@/models/trans_16k"
-                "${NEOLIP_CSLU_FA_DIR}/custom_dictionary.txt@/dictionaries/custom_dictionary.txt"
-                "${NEOLIP_CSLU_RUNTIME_DIR}/Toolkit/2.0/script/dictionary_1.0/cmu@/dictionaries/cmu"
-                "${NEOLIP_CSLU_RUNTIME_DIR}/Festival/1.4.2/festival/lib/dicts/ogi_lex.out@/dictionaries/ogi_lex.out"
-                "${NEOLIP_CSLU_RUNTIME_DIR}/Festival/1.4.2/festival/lib/ogi_lex_addenda.scm@/dictionaries/ogi_lex_addenda.scm"
         )
         target_include_directories(NeoLIP PRIVATE src)
         target_compile_definitions(NeoLIP PRIVATE ${NEOLIP_COMMON_DEFINITIONS})
@@ -368,9 +393,8 @@ if(NEOLIP_BUILD_WX_GUI)
                 DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications)
         endif()
 
-        install(DIRECTORY dictionaries/
-            DESTINATION "${NEOLIP_DATA_PREFIX}dictionaries"
-            FILES_MATCHING PATTERN "*.dict")
+        install(DIRECTORY "${NEOLIP_BUNDLED_DICTIONARY_ROOT}/"
+            DESTINATION "${NEOLIP_DATA_PREFIX}dictionaries")
         install(FILES
             "${NEOLIP_CSLU_FA_DIR}/phonemes_new_16k.train.spec"
             "${NEOLIP_CSLU_FA_DIR}/phonemes_new_16k.parts"
@@ -379,15 +403,6 @@ if(NEOLIP_BUILD_WX_GUI)
             "${NEOLIP_CSLU_FA_DIR}/bc_16k"
             "${NEOLIP_CSLU_FA_DIR}/trans_16k"
             DESTINATION "${NEOLIP_DATA_PREFIX}models")
-        install(FILES "${NEOLIP_CSLU_FA_DIR}/custom_dictionary.txt"
-            DESTINATION "${NEOLIP_DATA_PREFIX}dictionaries")
-        install(DIRECTORY
-            "${NEOLIP_CSLU_RUNTIME_DIR}/Toolkit/2.0/script/dictionary_1.0/cmu"
-            DESTINATION "${NEOLIP_DATA_PREFIX}dictionaries")
-        install(FILES
-            "${NEOLIP_CSLU_RUNTIME_DIR}/Festival/1.4.2/festival/lib/dicts/ogi_lex.out"
-            "${NEOLIP_CSLU_RUNTIME_DIR}/Festival/1.4.2/festival/lib/ogi_lex_addenda.scm"
-            DESTINATION "${NEOLIP_DATA_PREFIX}dictionaries")
 
     elseif(NEOLIP_REQUIRE_WX_GUI)
         message(FATAL_ERROR "wxWidgets was not found, but NEOLIP_REQUIRE_WX_GUI is ON. On Windows, use the pinned wxWidgets 3.3.3 overlay from neoshared; on Debian or Ubuntu, install libwxgtk3.2-dev")

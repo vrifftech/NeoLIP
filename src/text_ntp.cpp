@@ -981,48 +981,145 @@ static std::string tsvEscapeText(std::string s) {
     return out;
 }
 
+static bool isReadableDictionaryFile(const std::filesystem::path& path) {
+    if (path.empty()) return false;
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(path, error) || error) return false;
+    const auto size = std::filesystem::file_size(path, error);
+    return !error && size > 0;
+}
+
+static bool isCmuDictionaryComplete(const std::filesystem::path& directory) {
+    std::error_code error;
+    if (!std::filesystem::is_directory(directory, error) || error) return false;
+    for (char letter = 'a'; letter <= 'z'; ++letter) {
+        if (!isReadableDictionaryFile(directory / (std::string(1, letter) + ".ob"))) return false;
+    }
+    return true;
+}
+
+static void configureStandaloneDictionaryPaths(TextToNtpOptions& options,
+                                                const std::filesystem::path& root) {
+    options.customDictionary = root / "custom_dictionary.txt";
+    options.cmuDictionaryDir = root / "cmu";
+    options.ogiLexiconPath = root / "ogi_lex.out";
+    options.ogiAddendaPath = root / "ogi_lex_addenda.scm";
+}
+
+static void configureLegacyDictionaryPaths(TextToNtpOptions& options,
+                                            const std::filesystem::path& faRoot) {
+    options.customDictionary = faRoot / "custom_dictionary.txt";
+    options.cmuDictionaryDir = faRoot / ".." / ".." / "script" / "dictionary_1.0" / "cmu";
+    options.ogiLexiconPath = faRoot / ".." / ".." / ".." / ".." / "Festival" / "1.4.2" / "festival" / "lib" / "dicts" / "ogi_lex.out";
+    options.ogiAddendaPath = faRoot / ".." / ".." / ".." / ".." / "Festival" / "1.4.2" / "festival" / "lib" / "ogi_lex_addenda.scm";
+}
+
+static bool hasCompleteBaseDictionaries(const TextToNtpOptions& options) {
+    return isReadableDictionaryFile(options.customDictionary) &&
+           isCmuDictionaryComplete(options.cmuDictionaryDir) &&
+           isReadableDictionaryFile(options.ogiLexiconPath) &&
+           isReadableDictionaryFile(options.ogiAddendaPath);
+}
+
+static void appendOverrideDictionary(TextToNtpOptions& options,
+                                     const std::filesystem::path& path,
+                                     bool requireFile) {
+    if (!requireFile && !isReadableDictionaryFile(path)) return;
+    const std::filesystem::path normalized = path.lexically_normal();
+    for (const auto& existing : options.overrideDictionaries) {
+        if (existing.lexically_normal() == normalized) return;
+    }
+    options.overrideDictionaries.push_back(path);
+}
+
+static std::vector<std::filesystem::path> missingDictionaryAssets(const TextToNtpOptions& options) {
+    std::vector<std::filesystem::path> missing;
+    if (!isReadableDictionaryFile(options.customDictionary)) {
+        missing.push_back(options.customDictionary);
+    }
+    for (char letter = 'a'; letter <= 'z'; ++letter) {
+        const std::filesystem::path file = options.cmuDictionaryDir / (std::string(1, letter) + ".ob");
+        if (!isReadableDictionaryFile(file)) missing.push_back(file);
+    }
+    if (options.useOgiLexicon && !isReadableDictionaryFile(options.ogiLexiconPath)) {
+        missing.push_back(options.ogiLexiconPath);
+    }
+    if (options.useOgiAddenda && !isReadableDictionaryFile(options.ogiAddendaPath)) {
+        missing.push_back(options.ogiAddendaPath);
+    }
+    for (const auto& path : options.overrideDictionaries) {
+        if (!isReadableDictionaryFile(path)) missing.push_back(path);
+    }
+    return missing;
+}
+
+static void requireDictionaryAssets(const TextToNtpOptions& options) {
+    const auto missing = missingDictionaryAssets(options);
+    if (missing.empty()) return;
+
+    std::ostringstream message;
+    message << "NeoLIP pronunciation dictionaries are incomplete. Missing required asset";
+    if (missing.size() != 1) message << 's';
+    message << ':';
+    for (const auto& path : missing) message << "\n  " << path.string();
+    message << "\nReinstall NeoLIP or pass --dict-root <dictionaries_dir> containing "
+               "custom_dictionary.txt, cmu/a.ob through cmu/z.ob, "
+               "ogi_lex.out, ogi_lex_addenda.scm, and kotor_override.dict.";
+    throw std::runtime_error(message.str());
+}
+
 } // namespace
 
 TextToNtpOptions makeDefaultTextToNtpOptions(const std::filesystem::path& faRoot) {
-    TextToNtpOptions o;
-    o.faRoot = faRoot;
+    TextToNtpOptions options;
+    options.faRoot = faRoot;
 
     // Supports both layouts:
     //   legacy:      <CSLU>/Toolkit/2.0/apps/fa
     //   standalone:  <package>/models with sibling <package>/dictionaries
-    const std::filesystem::path siblingDictRoot = faRoot.parent_path() / "dictionaries";
-    const auto addDefaultOverrideIfPresent = [&](const std::filesystem::path& path) {
-        if (std::filesystem::exists(path) && std::filesystem::is_regular_file(path)) {
-            o.overrideDictionaries.push_back(path);
-        }
-    };
+    // A directory merely existing is not enough: incomplete package folders must
+    // not silently shadow the complete CSLU Toolkit dictionaries.
+    const std::filesystem::path siblingRoot = faRoot.parent_path() / "dictionaries";
 
-    if (std::filesystem::exists(siblingDictRoot)) {
-        o.customDictionary = siblingDictRoot / "custom_dictionary.txt";
-        o.cmuDictionaryDir = siblingDictRoot / "cmu";
-        o.ogiLexiconPath = siblingDictRoot / "ogi_lex.out";
-        o.ogiAddendaPath = siblingDictRoot / "ogi_lex_addenda.scm";
-        addDefaultOverrideIfPresent(siblingDictRoot / "kotor_override.dict");
+    TextToNtpOptions standalone = options;
+    configureStandaloneDictionaryPaths(standalone, siblingRoot);
+
+    TextToNtpOptions legacy = options;
+    configureLegacyDictionaryPaths(legacy, faRoot);
+
+    if (hasCompleteBaseDictionaries(standalone)) {
+        options = std::move(standalone);
+        // Standalone NeoLIP packages always include the built-in KOTOR layer.
+        // Keep the expected path even if the installation is damaged so the
+        // resolver reports the missing file instead of treating KOTOR names as
+        // ordinary unknown words.
+        appendOverrideDictionary(options, siblingRoot / "kotor_override.dict", true);
+    } else if (hasCompleteBaseDictionaries(legacy)) {
+        options = std::move(legacy);
+        // A raw CSLU Toolkit does not contain NeoLIP's override. Accept it when
+        // supplied beside the models or in a sibling package dictionary folder.
+        appendOverrideDictionary(options, siblingRoot / "kotor_override.dict", false);
+        appendOverrideDictionary(options, faRoot / "kotor_override.dict", false);
+    } else if (std::filesystem::exists(siblingRoot)) {
+        options = std::move(standalone);
+        appendOverrideDictionary(options, siblingRoot / "kotor_override.dict", true);
     } else {
-        o.customDictionary = faRoot / "custom_dictionary.txt";
-        o.cmuDictionaryDir = faRoot / ".." / ".." / "script" / "dictionary_1.0" / "cmu";
-        o.ogiLexiconPath = faRoot / ".." / ".." / ".." / ".." / "Festival" / "1.4.2" / "festival" / "lib" / "dicts" / "ogi_lex.out";
-        o.ogiAddendaPath = faRoot / ".." / ".." / ".." / ".." / "Festival" / "1.4.2" / "festival" / "lib" / "ogi_lex_addenda.scm";
-        addDefaultOverrideIfPresent(faRoot / "kotor_override.dict");
+        options = std::move(legacy);
     }
 
-    o.mode = NtpOutputMode::SimpleLinear;
-    o.customFirst = true;
-    o.useOgiLexicon = true;
-    o.useOgiAddenda = true;
-    o.failOnUnknown = true;
-    return o;
+    options.mode = NtpOutputMode::SimpleLinear;
+    options.customFirst = true;
+    options.useOgiLexicon = true;
+    options.useOgiAddenda = true;
+    options.failOnUnknown = true;
+    return options;
 }
 
 struct TextToNtpResolver::Impl {
     explicit Impl(TextToNtpOptions opts)
         : options(std::move(opts)), cmu(options.cmuDictionaryDir),
           ogi(options.ogiLexiconPath, options.ogiAddendaPath, options.useOgiLexicon, options.useOgiAddenda) {
+        requireDictionaryAssets(options);
         for (const auto& p : options.overrideDictionaries) {
             overrideMaps.push_back(readCustomDictionary(p, sourceNameForPath("override", p)));
         }

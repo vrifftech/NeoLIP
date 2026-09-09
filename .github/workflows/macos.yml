@@ -77,13 +77,22 @@ jobs:
             --deployment-target "$MACOSX_DEPLOYMENT_TARGET" \
             --neoshared-root ../neoshared \
             --jobs 2 \
-            --clean
+            --clean \
+            --cmake-arg -DNEOLIP_BUILD_TESTS=ON \
+            --cmake-arg -DNEOLIP_BUILD_CLI=OFF
 
-      - name: Validate packaged pronunciation dictionaries
+      - name: Test engine and native product UI
+        run: ctest --test-dir "tool/build-macos-${{ matrix.arch }}" -C Release --output-on-failure
+
+      - name: Validate packaged models and dictionaries
         run: |
           APP="tool/stage-macos-${{ matrix.arch }}/NeoLIP.app"
-          test -x "$APP/Contents/MacOS/neolip_backend"
-          "$APP/Contents/MacOS/neolip_backend" validate-package "$APP/Contents/Resources"
+          cmake -DNEOLIP_PACKAGE_ROOT="$APP/Contents/Resources" -P tool/scripts/validate-assets.cmake
+
+      - name: Exercise GUI workflow with installed bundle assets
+        run: |
+          export NEOLIP_TEST_APP_EXECUTABLE="$GITHUB_WORKSPACE/tool/stage-macos-${{ matrix.arch }}/NeoLIP.app/Contents/MacOS/NeoLIP"
+          ctest --test-dir "tool/build-macos-${{ matrix.arch }}" -C Release -R '^neolip_ui_tests$' --output-on-failure
 
       - name: Verify package checksum
         run: |

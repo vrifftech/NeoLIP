@@ -1,3 +1,4 @@
+#include "work_control.hpp"
 #include "nnet45.hpp"
 
 #include <algorithm>
@@ -110,6 +111,7 @@ std::vector<double> NNet45::forwardOne(const std::vector<double>& acousticInput)
         double sum = 0.0;
         const std::size_t row = static_cast<std::size_t>(j) * static_cast<std::size_t>(inputCount);
         for (int i = 0; i < inputCount; ++i) {
+            if ((i & 63) == 0) checkWork();
             sum += static_cast<double>(wInputHidden[row + static_cast<std::size_t>(i)]) * x[static_cast<std::size_t>(i)];
         }
         h[static_cast<std::size_t>(j)] = sigmoid(sum);
@@ -135,6 +137,7 @@ Matrix NNet45::forwardMatrix(const Matrix& acousticInputs) const {
 
     std::vector<double> row(acousticInputs.cols);
     for (std::size_t r = 0; r < acousticInputs.rows; ++r) {
+        if ((r & 63) == 0) checkWork();
         for (std::size_t c = 0; c < acousticInputs.cols; ++c) {
             row[c] = acousticInputs(r, c);
         }
@@ -173,6 +176,7 @@ NNetCompareStats compareMatrices(const Matrix& actual, const Matrix& expected) {
     long double sumAbs = 0.0L;
     s.maxAbsError = -1.0;
     for (std::size_t r = 0; r < actual.rows; ++r) {
+        if ((r & 63) == 0) checkWork();
         if (argmaxRow(actual, r) == argmaxRow(expected, r)) {
             ++s.top1Matches;
         }

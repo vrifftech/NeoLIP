@@ -1,3 +1,4 @@
+#include "work_control.hpp"
 #include "backend.hpp"
 
 #include "feature_context.hpp"
@@ -99,6 +100,7 @@ static double exponentAdjust(double x, std::size_t numCategories, double exponen
 static void normalizeFeatureRows(Matrix& prob, const IndexLists& stateLists) {
     requireRowColumn(prob, "probability matrix");
     for (std::size_t r = 0; r < prob.rows; ++r) {
+        if ((r & 63) == 0) checkWork();
         double sum = 0.0;
         for (const auto& idxs : stateLists) {
             sum += maxMapped(prob, r, idxs);
@@ -124,6 +126,7 @@ static int categoryIndexForStateName(const std::vector<std::string>& uniqueState
 static std::size_t findUnescapedStateDelimiter(const std::string& state, char delimiter) {
     bool escaped = false;
     for (std::size_t i = 0; i < state.size(); ++i) {
+        if ((i & 63) == 0) checkWork();
         const char ch = state[i];
         if (escaped) {
             escaped = false;
@@ -178,6 +181,7 @@ static PhnFile phnFromStateSegments(const std::vector<PhnInterval>& stateSegment
 
     // Undo the split labels used by fa_new_16k.tcl.
     for (std::size_t i = 0; i < raw.size(); ++i) {
+        if ((i & 63) == 0) checkWork();
         if (i + 1 < raw.size()) {
             const auto& a = raw[i];
             const auto& b = raw[i + 1];
@@ -238,6 +242,7 @@ Matrix appendGarbageMedianColumn(const Matrix& nnetOrig, int N) {
 
     std::vector<double> row(j);
     for (std::size_t r = 0; r < nnetOrig.rows; ++r) {
+        if ((r & 63) == 0) checkWork();
         for (std::size_t c = 0; c < j; ++c) {
             const double v = nnetOrig(r, c);
             out(r, c) = v;
@@ -284,6 +289,24 @@ TraceGraph readTraceGraph(const std::filesystem::path& dumpDir) {
     g.phnToFrom = readIndexValueList(dumpDir / "graph" / "phn_to_from.list.tsv");
     g.stateToFrom = readIndexValueList(dumpDir / "graph" / "state_to_from.list.tsv");
     g.stateToFromIdx = parseIndexLists(readIndexValueList(dumpDir / "graph" / "state_to_from_idx.list.tsv"));
+    const std::filesystem::path durationPath =
+        dumpDir / "graph" / "state_duration_bounds.list.tsv";
+    if (std::filesystem::exists(durationPath)) {
+        const IndexLists rows =
+            parseIndexLists(readIndexValueList(durationPath));
+        if (rows.size() != g.statesInitial.size()) {
+            throw std::runtime_error(
+                "trace state-duration count does not match state count");
+        }
+        g.stateDurations.reserve(rows.size());
+        for (const IndexList& row : rows) {
+            if (row.size() < 2 || row[0] < 0 || row[1] < row[0]) {
+                throw std::runtime_error(
+                    "trace contains invalid state-duration bounds");
+            }
+            g.stateDurations.push_back({row[0], row[1]});
+        }
+    }
     return g;
 }
 
@@ -320,6 +343,7 @@ Matrix phnfeatCombinePhn(Matrix probM,
     out.data.assign(out.rows * out.cols, 0.0);
 
     for (std::size_t r = 0; r < frames; ++r) {
+        if ((r & 63) == 0) checkWork();
         for (std::size_t s = 0; s < states; ++s) {
             double m = clampProbability(maxMapped(probM, r, statesM[s]));
             double p = clampProbability(maxMapped(probP, r, statesP[s]));
@@ -386,6 +410,7 @@ Matrix phnfeatCombineTrans(const Matrix& probM,
     out.data.assign(out.rows * out.cols, 0.0);
 
     for (std::size_t r = 0; r < frames; ++r) {
+        if ((r & 63) == 0) checkWork();
         double total = 0.0;
         for (std::size_t s = 0; s < states; ++s) {
             const double m = exponentAdjust(maxMapped(probM, r, statesM[s]), probM.cols, mannerExp);
@@ -475,9 +500,38 @@ ViterbiAlignment csluViterbiAlign(const TraceGraph& graph,
     if (graph.phnToFrom.size() != transProb.cols) {
         throw std::runtime_error("csluViterbiAlign transProb column count does not match transition label count");
     }
+    if (options.durationModel != "greedy" &&
+        options.durationModel != "none" &&
+        !options.durationModel.empty()) {
+        throw std::runtime_error(
+            "csluViterbiAlign unsupported duration model: " +
+            options.durationModel);
+    }
+    if (!graph.stateDurations.empty() &&
+        graph.stateDurations.size() != nodes) {
+        throw std::runtime_error(
+            "csluViterbiAlign state-duration count does not match state count");
+    }
+    const bool useGreedyDurations =
+        options.durationModel == "greedy" &&
+        !graph.stateDurations.empty();
+    if (options.frameMs <= 0) {
+        throw std::runtime_error(
+            "csluViterbiAlign frame duration must be positive");
+    }
+    // CSLU's Viterbi_init stores each supplied duration penalty as
+    // penalty * stateNet.frameSize * 0.1. fa_new_16k uses 5 ms frames,
+    // yielding -3.25 and -0.5 respectively.
+    const double durationPenaltyScale =
+        static_cast<double>(options.frameMs) * 0.1;
+    const double durationShortPenaltyPerFrame =
+        options.durationShortPenalty * durationPenaltyScale;
+    const double durationLongPenaltyPerFrame =
+        options.durationLongPenalty * durationPenaltyScale;
 
     auto findNode = [&](const std::string& label) -> std::size_t {
         for (std::size_t i = 0; i < graph.statesInitial.size(); ++i) {
+            if ((i & 63) == 0) checkWork();
             if (graph.statesInitial[i] == label) {
                 return i;
             }
@@ -505,12 +559,14 @@ ViterbiAlignment csluViterbiAlign(const TraceGraph& graph,
 
     constexpr double neg = -1.0e100;
     std::vector<double> prev(nodes, neg), cur(nodes, neg);
+    std::vector<int> prevBegin(nodes, -1), curBegin(nodes, -1);
     prev[bouNode] = 0.0; // /BOU
     std::vector<std::vector<int>> back(frames, std::vector<int>(nodes, -1));
-    std::vector<std::vector<int>> backTrans(frames, std::vector<int>(nodes, -1));
 
     for (std::size_t t = 0; t < frames; ++t) {
+        if ((t & 63) == 0) checkWork();
         std::fill(cur.begin(), cur.end(), neg);
+        std::fill(curBegin.begin(), curBegin.end(), -1);
         for (std::size_t to = 0; to < nodes; ++to) {
             const auto& state = graph.statesInitial[to];
             if (state == "/BOU" || state == "/EOU") {
@@ -524,7 +580,7 @@ ViterbiAlignment csluViterbiAlign(const TraceGraph& graph,
                                                  options.observationProbFloor));
             double best = neg;
             int bestFrom = -1;
-            int bestTrans = -1;
+            int bestBegin = -1;
             for (const auto& [from, trans] : incoming[to]) {
                 if (prev[static_cast<std::size_t>(from)] <= neg / 2.0) {
                     continue;
@@ -532,18 +588,55 @@ ViterbiAlignment csluViterbiAlign(const TraceGraph& graph,
                 const double tr = options.transProbFactor *
                     std::log(std::max(transProb(t, static_cast<std::size_t>(trans)),
                                       options.transitionProbFloor));
-                const double score = prev[static_cast<std::size_t>(from)] + tr + obs;
-                if (score > best) {
+                double durationPenalty = 0.0;
+                if (useGreedyDurations &&
+                    static_cast<std::size_t>(from) != bouNode &&
+                    static_cast<std::size_t>(from) != eouNode) {
+                    const int beginFrame =
+                        prevBegin[static_cast<std::size_t>(from)];
+                    if (beginFrame < 0) {
+                        throw std::runtime_error(
+                            "csluViterbiAlign reached a state without a begin frame");
+                    }
+                    const int elapsedFrames =
+                        static_cast<int>(t) - beginFrame;
+                    const StateDurationBounds& bounds =
+                        graph.stateDurations[static_cast<std::size_t>(from)];
+                    if (from == static_cast<int>(to)) {
+                        if (elapsedFrames > bounds.maximumFrames) {
+                            durationPenalty += durationLongPenaltyPerFrame;
+                        }
+                    } else if (elapsedFrames < bounds.minimumFrames) {
+                        durationPenalty +=
+                            static_cast<double>(bounds.minimumFrames - elapsedFrames) *
+                            durationShortPenaltyPerFrame;
+                    }
+                }
+
+                const double score =
+                    prev[static_cast<std::size_t>(from)] + tr +
+                    durationPenalty + obs;
+                // CSLU resolves an exact tie in favour of a self-loop. This is
+                // significant at state-duration boundaries where penalties are
+                // piecewise constant.
+                if (score > best ||
+                    (from == static_cast<int>(to) && score >= best)) {
                     best = score;
                     bestFrom = from;
-                    bestTrans = trans;
+                    if (from == static_cast<int>(to) &&
+                        prevBegin[static_cast<std::size_t>(from)] >= 0) {
+                        bestBegin = prevBegin[static_cast<std::size_t>(from)];
+                    } else {
+                        bestBegin = static_cast<int>(t);
+                    }
                 }
             }
             cur[to] = best;
+            curBegin[to] = bestBegin;
             back[t][to] = bestFrom;
-            backTrans[t][to] = bestTrans;
         }
         prev.swap(cur);
+        prevBegin.swap(curBegin);
     }
 
     int endFrom = -1;
@@ -583,7 +676,9 @@ ViterbiAlignment csluViterbiAlign(const TraceGraph& graph,
     int curNode = path[0];
     int startFrame = 0;
     for (std::size_t t = 1; t < frames; ++t) {
+        if ((t & 63) == 0) checkWork();
         if (path[t] != curNode) {
+            out.segmentNodes.push_back(curNode);
             out.stateSegments.push_back({startFrame * options.frameMs,
                                          static_cast<int>(t) * options.frameMs,
                                          graph.statesInitial[static_cast<std::size_t>(curNode)]});
@@ -591,6 +686,7 @@ ViterbiAlignment csluViterbiAlign(const TraceGraph& graph,
             curNode = path[t];
         }
     }
+    out.segmentNodes.push_back(curNode);
     out.stateSegments.push_back({startFrame * options.frameMs,
                                  static_cast<int>(frames) * options.frameMs,
                                  graph.statesInitial[static_cast<std::size_t>(curNode)]});

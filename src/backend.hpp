@@ -38,12 +38,22 @@ struct BackendTraceData {
     IndexLists transStatesH;
 };
 
+struct StateDurationBounds {
+    int minimumFrames = 0;
+    int maximumFrames = 0;
+};
+
 struct TraceGraph {
     std::vector<std::string> statesInitial;
     std::vector<std::string> uniqueStates;
     std::vector<std::string> phnToFrom;
     std::vector<std::string> stateToFrom;
     std::vector<IndexList> stateToFromIdx; // rows: toNode fromNode transColumn
+    // Parallel to statesInitial. /BOU and /EOU use zero bounds. Generated
+    // graphs populate this from phonemes_new_16k.train.spec. Legacy trace
+    // imports may leave it empty, in which case duration scoring is disabled.
+    std::vector<StateDurationBounds> stateDurations;
+    std::vector<int> stateWords; // Optional word identity per node; -1 for boundary/pause.
 };
 
 Matrix appendGarbageMedianColumn(const Matrix& nnetOrig, int N = 20);
@@ -93,10 +103,10 @@ struct ViterbiOptions {
     double transitionProbFloor = 1.0e-10;
     int frameMs = 5;
 
-    // The forced-alignment spec shipped with CSLU's 16 kHz PHN path uses
-    // duration_model greedy. The recovered phone-boundary search below follows
-    // that path. These fields are retained so trace/script parameters can be
-    // reported and later extended if a non-greedy spec is introduced.
+    // CSLU's 16 kHz forced aligner uses duration_model greedy. Leaving a state
+    // before dur_p1 costs one short penalty for each missing frame. Remaining
+    // in a state beyond dur_p2 costs one long penalty per additional self-loop.
+    // Viterbi_init scales both configured values by frameMs / 10 before use.
     std::string durationModel = "greedy";
     double durationShortPenalty = -6.5;
     double durationLongPenalty = -1.0;
@@ -105,13 +115,14 @@ struct ViterbiOptions {
 struct ViterbiAlignment {
     PhnFile phn;
     std::vector<PhnInterval> stateSegments;
+    std::vector<int> segmentNodes; // Parallel node IDs, including repeated state labels.
     double pathScore = 0.0;
 };
 
-// CSLU-compatible forced-alignment DP for the linear/manual .ntp graph used by
-// the KOTOR PHN path. This reproduces the traced CSLU .phn boundary path from
-// graph + phnProb + transProb. CSLU's printed answer score has extra internal
-// accounting and is not needed for .phn/.lip generation.
+// CSLU-compatible forced-alignment DP for both linear and optional-branch NTP
+// graphs. This includes the original greedy state-duration penalties.
+// CSLU's printed answer score has extra internal accounting and is not needed
+// for .phn/.lip generation.
 ViterbiAlignment csluViterbiAlign(const TraceGraph& graph,
                                   const Matrix& phnProb,
                                   const Matrix& transProb,

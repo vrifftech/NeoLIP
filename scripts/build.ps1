@@ -4,7 +4,7 @@ param(
     [ValidateSet('Debug','Release','RelWithDebInfo','MinSizeRel')][string]$BuildType = 'Release',
     [ValidateSet('ON','OFF')][string]$Wx = 'ON',
     [ValidateSet('ON','OFF')][string]$RequireWx = 'ON',
-    [ValidateSet('ON','OFF')][string]$Cli = 'ON',
+    [ValidateSet('ON','OFF')][string]$Cli = 'OFF',
     [ValidateSet('ON','OFF')][string]$MinimalRelease = 'ON',
     [int]$Parallel = 0,
     [string]$Target = '',
@@ -57,12 +57,10 @@ $cmakeArgs += @(
 
 $cmakeArgs += @(
     "-DNEOLIP_BUILD_WX_GUI=$Wx",
-    "-DNEOLIP_REQUIRE_WX_GUI=$RequireWx"
+    "-DNEOLIP_REQUIRE_WX_GUI=$RequireWx",
+    "-DNEOLIP_BUILD_CLI=$Cli"
 )
 
-if ($Cli -ne 'ON') {
-    Write-Host 'Note: NeoLIP has no public CLI; -Cli is retained only for compatibility.'
-}
 
 if ([string]::IsNullOrWhiteSpace($NeoSharedRoot)) {
     foreach ($sharedName in @('neoshared', 'NeoShared')) {
@@ -156,17 +154,5 @@ if ($Wx -eq 'ON' -and
     if ([string]::IsNullOrWhiteSpace($guiPath)) {
         throw "NeoLIP GUI was requested, but no NeoLIP executable was produced under $BuildDir"
     }
-    $backendCandidates = @(
-        (Join-Path $BuildDir 'neolip_backend.exe'),
-        (Join-Path $BuildDir 'neolip_backend'),
-        (Join-Path (Join-Path $BuildDir $BuildType) 'neolip_backend.exe'),
-        (Join-Path (Join-Path $BuildDir $BuildType) 'neolip_backend')
-    )
-    $backendPath = $backendCandidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
-    if ([string]::IsNullOrWhiteSpace($backendPath)) {
-        throw "NeoLIP was built without its required backend helper under $BuildDir"
-    }
-
     Write-Host "Built NeoLIP executable: $guiPath"
-    Write-Host "Built NeoLIP backend:    $backendPath"
 }

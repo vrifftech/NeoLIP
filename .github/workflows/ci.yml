@@ -55,7 +55,8 @@ jobs:
             ninja-build \
             pkg-config \
             libwxgtk3.2-dev \
-            zlib1g-dev
+            zlib1g-dev \
+            xvfb xauth
 
       - name: Configure and build
         working-directory: tool
@@ -70,7 +71,11 @@ jobs:
             --neoshared-root ../neoshared \
             --no-vcpkg \
             --jobs 2 \
-            --clean
+            --clean \
+            -- -DNEOLIP_BUILD_TESTS=ON
+
+      - name: Test engine and native product UI
+        run: ctest --test-dir tool/build -C Release --output-on-failure
 
       - name: Stage install tree
         run: cmake --install tool/build --config Release --prefix tool/stage
@@ -78,11 +83,15 @@ jobs:
       - name: Verify Linux application package
         run: |
           test -x tool/stage/bin/NeoLIP
-          test -x tool/stage/bin/neolip_backend
           test -d tool/stage/models
           test -d tool/stage/dictionaries
-          file tool/stage/bin/NeoLIP tool/stage/bin/neolip_backend
-          tool/stage/bin/neolip_backend validate-package tool/stage
+          file tool/stage/bin/NeoLIP
+          cmake -DNEOLIP_PACKAGE_ROOT=tool/stage -P tool/scripts/validate-assets.cmake
+
+      - name: Exercise GUI workflow with installed assets
+        run: |
+          export NEOLIP_TEST_APP_EXECUTABLE="$GITHUB_WORKSPACE/tool/stage/bin/NeoLIP"
+          ctest --test-dir tool/build -C Release -R '^neolip_ui_tests$' --output-on-failure
 
       - name: Bundle the matching wxWidgets runtime
         run: bash tool/scripts/bundle-linux-wx.sh tool/stage
@@ -91,7 +100,6 @@ jobs:
         run: |
           test -x tool/stage/bin/NeoLIP
           test -x tool/stage/libexec/neolip/NeoLIP
-          test -x tool/stage/libexec/neolip/neolip_backend
           test -d tool/stage/lib/neolip
 
       - name: Package portable Linux application
@@ -167,7 +175,11 @@ jobs:
             -VcpkgRoot $env:VCPKG_INSTALLATION_ROOT `
             -VcpkgTriplet x64-windows-static `
             -Parallel 2 `
-            -Clean
+            -Clean `
+            -ExtraCMakeArgs '-DNEOLIP_BUILD_TESTS=ON'
+
+      - name: Test engine and native product UI
+        run: ctest --test-dir tool/build -C Release --output-on-failure
 
       - name: Stage install tree
         shell: pwsh
@@ -178,7 +190,6 @@ jobs:
         run: |
           $required = @(
             'tool\stage\NeoLIP.exe',
-            'tool\stage\neolip_backend.exe',
             'tool\stage\models',
             'tool\stage\dictionaries'
           )
@@ -187,11 +198,18 @@ jobs:
               throw "NeoLIP package is missing required output: $path"
             }
           }
-          & 'tool\stage\neolip_backend.exe' validate-package 'tool\stage'
+          cmake -DNEOLIP_PACKAGE_ROOT=tool/stage -P tool/scripts/validate-assets.cmake
           if ($LASTEXITCODE -ne 0) {
-            throw "NeoLIP's packaged dictionary smoke test failed with exit code $LASTEXITCODE"
+            throw "NeoLIP's packaged asset check failed with exit code $LASTEXITCODE"
           }
           Get-ChildItem -LiteralPath 'tool\stage' | Format-Table Name, Length
+
+      - name: Exercise GUI workflow with installed assets
+        shell: pwsh
+        run: |
+          $env:NEOLIP_TEST_APP_EXECUTABLE = (Resolve-Path 'tool/stage/NeoLIP.exe').Path
+          ctest --test-dir tool/build -C Release -R '^neolip_ui_tests$' --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged-asset GUI tests failed' }
 
       - name: Package Windows application
         shell: pwsh

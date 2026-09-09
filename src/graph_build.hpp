@@ -1,6 +1,7 @@
 #pragma once
 
 #include "backend.hpp"
+#include "text_ntp.hpp"
 
 #include <filesystem>
 #include <map>
@@ -56,6 +57,10 @@ std::map<std::string, FeatureMapEntry> readFeatureMap(const std::filesystem::pat
 
 GeneratedGraphBundle buildGraphBundleFromNtpText(const std::string& ntpText,
                                                   const std::filesystem::path& faRoot);
+// Same automatic pronunciation graph, with non-scoring word identity metadata.
+GeneratedGraphBundle buildGraphBundleFromWords(const TextToNtpResult& text,
+                                               const std::filesystem::path& faRoot);
+
 GeneratedGraphBundle buildGraphBundleFromNtpFile(const std::filesystem::path& ntpFile,
                                                   const std::filesystem::path& faRoot);
 

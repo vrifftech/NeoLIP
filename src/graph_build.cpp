@@ -1,3 +1,4 @@
+#include "work_control.hpp"
 #include "graph_build.hpp"
 
 #include "feature_context.hpp"
@@ -83,6 +84,7 @@ static StateContext parseStateContext(const std::string& state) {
 
     bool escaped = false;
     for (std::size_t i = 0; i < state.size(); ++i) {
+        if ((i & 63) == 0) checkWork();
         const char ch = state[i];
         if (escaped) {
             escaped = false;
@@ -133,6 +135,7 @@ static void addUnique(std::vector<std::string>& values, const std::string& value
 static std::string joinList(const std::vector<std::string>& values) {
     std::string out;
     for (std::size_t i = 0; i < values.size(); ++i) {
+        if ((i & 63) == 0) checkWork();
         if (i) out.push_back(' ');
         out += values[i];
     }
@@ -142,6 +145,7 @@ static std::string joinList(const std::vector<std::string>& values) {
 static std::string joinIndexList(const IndexList& values) {
     std::string out;
     for (std::size_t i = 0; i < values.size(); ++i) {
+        if ((i & 63) == 0) checkWork();
         if (i) out.push_back(' ');
         out += std::to_string(values[i]);
     }
@@ -156,6 +160,7 @@ static void writeIndexValueList(const std::vector<std::string>& values, const st
     }
     out << "index\tvalue\n";
     for (std::size_t i = 0; i < values.size(); ++i) {
+        if ((i & 63) == 0) checkWork();
         out << i << '\t' << values[i] << '\n';
     }
 }
@@ -392,6 +397,7 @@ static GeneratedMappings buildMappingsForGraph(const TraceGraph& graph, const st
     out.depList.reserve(graph.uniqueStates.size());
     out.vcList.reserve(graph.uniqueStates.size());
     for (std::size_t i = 0; i < graph.uniqueStates.size(); ++i) {
+        if ((i & 63) == 0) checkWork();
         out.depList.push_back((out.featPhnM[i] == out.featPhnP[i] && out.featPhnM[i] == out.featPhnH[i]) ? 1 : 0);
         const auto ctx = parseStateContext(graph.uniqueStates[i]);
         out.vcList.push_back(isVoicedClosure(ctx.phone) ? 1 : 0);
@@ -407,6 +413,7 @@ static GeneratedMappings buildMappingsForGraph(const TraceGraph& graph, const st
         const auto featSpec = readFeatureMap(faRoot / "bc_16k" / (sub + ".map"));
         int ntrIdx = -1;
         for (std::size_t i = 0; i < transSpec.size(); ++i) {
+            if ((i & 63) == 0) checkWork();
             if (transSpec[i].state == "<NTR>" || transSpec[i].state == "<ntr>") {
                 ntrIdx = static_cast<int>(i);
                 break;
@@ -470,6 +477,7 @@ static GeneratedMappings buildMappingsForGraph(const TraceGraph& graph, const st
 
 
 struct NtpExpr {
+    int wordIndex = -1;
     enum class Kind { Phone, Seq, Alt } kind = Kind::Seq;
     std::string phone;
     std::vector<NtpExpr> seq;
@@ -486,6 +494,7 @@ static std::vector<std::string> tokenizeNtpExpression(const std::string& text) {
         }
     };
     for (std::size_t i = 0; i < text.size(); ++i) {
+        if ((i & 63) == 0) checkWork();
         const char ch = text[i];
         if (std::isspace(static_cast<unsigned char>(ch))) {
             flush();
@@ -508,6 +517,7 @@ static std::vector<std::string> tokenizeNtpExpression(const std::string& text) {
 static std::string joinTokensWithSpaces(const std::vector<std::string>& toks) {
     std::string out;
     for (std::size_t i = 0; i < toks.size(); ++i) {
+        if ((i & 63) == 0) checkWork();
         if (i) out.push_back(' ');
         out += toks[i];
     }
@@ -523,6 +533,7 @@ static std::string canonicalizeNtpTopLevelAlternatives(const std::string& ntp) {
     };
     std::vector<Element> elems;
     for (std::size_t i = 0; i < toks.size();) {
+        if ((i & 63) == 0) checkWork();
         Element e;
         if (toks[i] == "(" || toks[i] == "[") {
             const std::string open = toks[i];
@@ -659,6 +670,7 @@ private:
 };
 
 struct NfaPhoneEdge {
+    int wordIndex = -1;
     int from = -1;
     int to = -1;
     std::string phone;
@@ -681,8 +693,8 @@ struct NfaGraph {
         eps.at(static_cast<std::size_t>(from)).push_back(to);
     }
 
-    void addPhone(int from, int to, const std::string& phone) {
-        phones.push_back({from, to, phone});
+    void addPhone(int from, int to, const std::string& phone, int word) {
+        phones.push_back({word, from, to, phone});
     }
 };
 
@@ -690,7 +702,7 @@ static void compileNtpSeqToNfa(const std::vector<NtpExpr>& seq, NfaGraph& nfa, i
 
 static void compileNtpExprToNfa(const NtpExpr& expr, NfaGraph& nfa, int start, int end) {
     if (expr.kind == NtpExpr::Kind::Phone) {
-        nfa.addPhone(start, end, expr.phone);
+        nfa.addPhone(start, end, expr.phone, expr.wordIndex);
         return;
     }
     if (expr.kind == NtpExpr::Kind::Seq) {
@@ -716,6 +728,7 @@ static void compileNtpSeqToNfa(const std::vector<NtpExpr>& seq, NfaGraph& nfa, i
     }
     int cur = start;
     for (std::size_t i = 0; i < seq.size(); ++i) {
+        if ((i & 63) == 0) checkWork();
         const int next = (i + 1 == seq.size()) ? end : nfa.newNode();
         compileNtpExprToNfa(seq[i], nfa, cur, next);
         cur = next;
@@ -725,6 +738,7 @@ static void compileNtpSeqToNfa(const std::vector<NtpExpr>& seq, NfaGraph& nfa, i
 static std::vector<std::vector<int>> reverseEps(const NfaGraph& nfa) {
     std::vector<std::vector<int>> rev(nfa.eps.size());
     for (std::size_t i = 0; i < nfa.eps.size(); ++i) {
+        if ((i & 63) == 0) checkWork();
         for (int to : nfa.eps[i]) {
             rev.at(static_cast<std::size_t>(to)).push_back(static_cast<int>(i));
         }
@@ -801,10 +815,11 @@ struct PhoneEdgeFragment {
 
 static TraceGraph buildExpandedNtpGraph(const std::string& ntpAfterSubstitutions,
                                         const std::map<std::string, int>& phonemeParts,
-                                        std::vector<std::string>* firstPathOut = nullptr) {
+                                        std::vector<std::string>* firstPathOut = nullptr,
+                                        const NtpExpr* taggedRoot = nullptr) {
     const auto toks = tokenizeNtpExpression(ntpAfterSubstitutions);
     NtpParser parser(toks);
-    const NtpExpr root = parser.parseRoot();
+    const NtpExpr root = taggedRoot ? *taggedRoot : parser.parseRoot();
 
     NfaGraph nfa;
     compileNtpExprToNfa(root, nfa, nfa.start, nfa.end);
@@ -815,10 +830,13 @@ static TraceGraph buildExpandedNtpGraph(const std::string& ntpAfterSubstitutions
     TraceGraph graph;
     graph.statesInitial.push_back("/BOU");
     graph.statesInitial.push_back("/EOU");
+    graph.stateWords = {-1, -1};
+    int currentWord = -1;
 
     auto addStateNode = [&](const std::string& state) -> int {
         const int idx = static_cast<int>(graph.statesInitial.size());
         graph.statesInitial.push_back(state);
+        graph.stateWords.push_back(currentWord);
         addUnique(graph.uniqueStates, state);
         return idx;
     };
@@ -836,12 +854,14 @@ static TraceGraph buildExpandedNtpGraph(const std::string& ntpAfterSubstitutions
     std::vector<NfaImmediateContexts> contexts;
     contexts.reserve(nfa.phones.size());
     for (std::size_t i = 0; i < nfa.phones.size(); ++i) {
+        if ((i & 63) == 0) checkWork();
         contexts.push_back(computeImmediateContexts(nfa, static_cast<int>(i)));
     }
 
     std::vector<PhoneEdgeFragment> fragments(nfa.phones.size());
     for (std::size_t ei = 0; ei < nfa.phones.size(); ++ei) {
         const auto& e = nfa.phones[ei];
+        currentWord = e.wordIndex;
         auto it = phonemeParts.find(e.phone);
         if (it == phonemeParts.end()) {
             throw std::runtime_error("phone '" + e.phone + "' is missing from phonemes_new_16k.parts");
@@ -999,6 +1019,7 @@ static TraceGraph buildExpandedNtpGraph(const std::string& ntpAfterSubstitutions
     std::vector<NodeInfo> nodes;
     nodes.reserve(phones.size() * 3);
     for (std::size_t i = 0; i < phones.size(); ++i) {
+        if ((i & 63) == 0) checkWork();
         const std::string& phn = phones[i];
         auto it = phonemeParts.find(phn);
         if (it == phonemeParts.end()) {
@@ -1073,6 +1094,31 @@ static std::map<std::string, std::pair<int, int>> durationMapFromSpec(const std:
     return out;
 }
 
+static void attachStateDurations(TraceGraph& graph,
+                                 const std::filesystem::path& specPath) {
+    const auto durations = durationMapFromSpec(specPath);
+    graph.stateDurations.assign(graph.statesInitial.size(), {});
+    for (std::size_t i = 0; i < graph.statesInitial.size(); ++i) {
+        if ((i & 63) == 0) checkWork();
+        const std::string& state = graph.statesInitial[i];
+        if (state == "/BOU" || state == "/EOU") {
+            continue;
+        }
+        const auto it = durations.find(state);
+        if (it == durations.end()) {
+            throw std::runtime_error(
+                "duration not found in complete spec for state " + state);
+        }
+        const int minimumFrames = it->second.first;
+        const int maximumFrames = it->second.second;
+        if (minimumFrames < 0 || maximumFrames < minimumFrames) {
+            throw std::runtime_error(
+                "invalid duration bounds in complete spec for state " + state);
+        }
+        graph.stateDurations[i] = {minimumFrames, maximumFrames};
+    }
+}
+
 static void writeTempSpec(const GeneratedGraphBundle& bundle,
                           const std::filesystem::path& faRoot,
                           const std::filesystem::path& path) {
@@ -1089,6 +1135,7 @@ static void writeTempSpec(const GeneratedGraphBundle& bundle,
     out << "$pau     := .pau /BOU /EOU .garbage ;\n\n";
     out << "// name\t\t\tindex\tdur_p1\tdur_p2\t\ttie\n";
     for (std::size_t i = 0; i < bundle.graph.uniqueStates.size(); ++i) {
+        if ((i & 63) == 0) checkWork();
         auto it = durations.find(bundle.graph.uniqueStates[i]);
         if (it == durations.end()) {
             throw std::runtime_error("duration not found in complete spec for state " + bundle.graph.uniqueStates[i]);
@@ -1104,6 +1151,7 @@ std::vector<std::string> tokenizeTclListLike(const std::string& line) {
     std::string cur;
     int braceDepth = 0;
     for (std::size_t i = 0; i < line.size(); ++i) {
+        if ((i & 63) == 0) checkWork();
         const char ch = line[i];
         if (ch == '\\' && i + 1 < line.size()) {
             cur.push_back(ch);
@@ -1170,6 +1218,7 @@ std::vector<std::string> parseSimpleNtpPhoneSequence(const std::string& ntpAfter
     std::vector<std::string> out;
     std::string cur;
     for (std::size_t i = 0; i < ntpAfterSubstitutions.size(); ++i) {
+        if ((i & 63) == 0) checkWork();
         const char ch = ntpAfterSubstitutions[i];
         if (std::isspace(static_cast<unsigned char>(ch))) {
             if (!cur.empty()) {
@@ -1313,7 +1362,40 @@ GeneratedGraphBundle buildGraphBundleFromNtpText(const std::string& ntpText,
     b.ntpAfterSubstitutions = canonicalizeNtpTopLevelAlternatives(applyFaNtpSubstitutions(ntpText));
     const auto parts = readPartsFile(faRoot / "phonemes_new_16k.parts");
     b.graph = buildExpandedNtpGraph(b.ntpAfterSubstitutions, parts, &b.phones);
+    attachStateDurations(
+        b.graph, faRoot / "phonemes_new_16k.train.spec");
     b.mappings = buildMappingsForGraph(b.graph, faRoot);
+    return b;
+}
+
+GeneratedGraphBundle buildGraphBundleFromWords(const TextToNtpResult& text,
+                                               const std::filesystem::path& faRoot) {
+    // Build the identical automatic graph a word at a time so alternatives,
+    // repeated phones and optional pauses never lose their originating word.
+    NtpExpr root;
+    const auto parse = [](const std::string& expr) {
+        return NtpParser(tokenizeNtpExpression(canonicalizeNtpTopLevelAlternatives(
+            applyFaNtpSubstitutions(expr)))).parseRoot();
+    };
+    const auto tag = [](auto&& self, NtpExpr& expr, int index) -> void {
+        if (expr.kind == NtpExpr::Kind::Phone && expr.phone != ".pau" && expr.phone != ".garbage") expr.wordIndex=index;
+        for (auto& item : expr.seq) self(self,item,index);
+        for (auto& alt : expr.alts) for (auto& item : alt) self(self,item,index);
+    };
+    if (text.wordInfo.empty()) throw std::runtime_error("Cannot align an empty transcript.");
+    if (text.wordInfo.front().word != ".pau") root.seq.push_back(parse("[.pau]"));
+    for (const auto& word : text.wordInfo) {
+        if (word.pronunciation.empty()) throw std::runtime_error("Word has no pronunciation: " + word.word);
+        auto expr=parse(word.pronunciation);
+        tag(tag,expr,static_cast<int>(word.index)); root.seq.push_back(std::move(expr));
+        if (word.word != ".pau") root.seq.push_back(parse("[.pau]"));
+    }
+    GeneratedGraphBundle b;
+    b.ntpOriginal=joinLinesAsSpaces(text.ntp);
+    b.ntpAfterSubstitutions=canonicalizeNtpTopLevelAlternatives(applyFaNtpSubstitutions(text.ntp));
+    b.graph=buildExpandedNtpGraph(b.ntpAfterSubstitutions,readPartsFile(faRoot/"phonemes_new_16k.parts"),&b.phones,&root);
+    attachStateDurations(b.graph,faRoot/"phonemes_new_16k.train.spec");
+    b.mappings=buildMappingsForGraph(b.graph,faRoot);
     return b;
 }
 
@@ -1362,6 +1444,16 @@ void writeGraphBundle(const GeneratedGraphBundle& bundle,
     writeIndexValueList(bundle.graph.phnToFrom, outDir / "graph" / "phn_to_from.list.tsv");
     writeIndexValueList(bundle.graph.stateToFrom, outDir / "graph" / "state_to_from.list.tsv");
     writeIndexLists(bundle.graph.stateToFromIdx, outDir / "graph" / "state_to_from_idx.list.tsv");
+    if (!bundle.graph.stateDurations.empty()) {
+        IndexLists durationRows;
+        durationRows.reserve(bundle.graph.stateDurations.size());
+        for (const StateDurationBounds& bounds : bundle.graph.stateDurations) {
+            durationRows.push_back({bounds.minimumFrames, bounds.maximumFrames});
+        }
+        writeIndexLists(
+            durationRows,
+            outDir / "graph" / "state_duration_bounds.list.tsv");
+    }
 
     writeIndexLists(bundle.mappings.featStatesM, outDir / "mapping" / "feat_states_idx_m.list.tsv");
     writeIndexLists(bundle.mappings.featStatesP, outDir / "mapping" / "feat_states_idx_p.list.tsv");

@@ -9,6 +9,7 @@
 #include <cstring>
 #include <fstream>
 #include <map>
+#include <limits>
 #include <random>
 #include <sstream>
 #include <stdexcept>
@@ -279,138 +280,65 @@ bool isRestOrPausePhone(const std::string& phoneIn) {
     return !phn.empty() && phn[0] == '.';
 }
 
-bool isPreservedClosureShape(std::uint8_t shape) {
-    // Visually important closures/fricatives/plosive contacts. These should not
-    // be smoothed out merely because they are short.
-    return shape == 11 || // M/P/B
-           shape == 8  || // F/V
-           shape == 15 || // K/G
-           shape == 12;   // T/D
-}
-
 int anticipationMsForShape(std::uint8_t shape, const LipQualityOptions& post) {
-    // These offsets shift only the visible mouth-shape key earlier. The PHN
-    // acoustic alignment remains unchanged. Values are intentionally small so
-    // plosive/fricative mouth contacts can be visible before the sound begins.
+    // Nonzero values are opt-in authoring settings, not recovered game rules.
     switch (shape) {
-        case 11: // M/P/B bilabial closure
-            return std::max(0, post.anticipateClosuresMs);
-        case 8:  // F/V
-        case 10: // TH -- dental fricative, handled with the fricative offset
-            return std::max(0, post.anticipateFricativesMs);
-        case 12: // T/D
-        case 15: // K/G
-            return std::max(0, post.anticipateStopsMs);
-        default:
-            return 0;
+        case 11: return std::max(0, post.anticipateClosuresMs);
+        case 8: case 10: return std::max(0, post.anticipateFricativesMs);
+        case 12: case 15: return std::max(0, post.anticipateStopsMs);
+        default: return 0;
     }
 }
 
-int lipTimeMs(double seconds) {
-    if (!std::isfinite(seconds)) return 0;
-    return static_cast<int>(std::llround(seconds * 1000.0));
+struct PoseSpan {
+    double start = 0, end = 0;
+    std::uint8_t shape = 0;
+};
+
+std::vector<PoseSpan> phonemeSpans(const PhnFile& phn, const LipQualityOptions& post) {
+    std::vector<PoseSpan> spans;
+    int previousEnd = 0;
+    int pendingBreathStart = -1;
+    for (std::size_t i = 0; i < phn.intervals.size(); ++i) {
+        const auto& iv = phn.intervals[i];
+        if (iv.startMs < previousEnd || iv.endMs < iv.startMs || iv.startMs < 0)
+            throw std::runtime_error("Phoneme intervals must be ordered, non-negative and non-overlapping.");
+        previousEnd = iv.endMs;
+        if (iv.startMs == iv.endMs) continue;
+        const bool pause = isRestOrPausePhone(iv.label);
+        auto mouth = csluPhoneToKotorShapeOrSkip(iv.label);
+        if (pause) {
+            pendingBreathStart = -1;
+            // Leading/trailing silence gets its own hold even when brief.
+            if (!post.closeOnPause || (i != 0 && i + 1 != phn.intervals.size() &&
+                    iv.endMs - iv.startMs < post.closeOnPauseMs)) continue;
+            mouth = 0;
+        } else if (mouth == 16) {
+            // Preserve the previous HH-to-following-vowel convention.
+            if (pendingBreathStart < 0) pendingBreathStart = iv.startMs;
+            continue;
+        } else if (mouth < 0) {
+            pendingBreathStart = -1;
+            continue;
+        }
+        const int start = pendingBreathStart >= 0 ? pendingBreathStart : iv.startMs;
+        pendingBreathStart = -1;
+        PoseSpan span{start / 1000.0, iv.endMs / 1000.0, static_cast<std::uint8_t>(mouth)};
+        if (!spans.empty() && spans.back().shape == span.shape) spans.back().end = span.end;
+        else spans.push_back(span);
+    }
+    return spans;
 }
 
-void addVisibleEntry(std::vector<KotorVisibleKeyframe>& entries, int timeMs,
-                     std::uint8_t shape) {
-    if (timeMs < 0) timeMs = 0;
-    if (shape > 15) shape = 15;
-    const double timeSeconds = static_cast<double>(timeMs) / 1000.0;
-    if (!entries.empty()) {
-        if (entries.back().timeSeconds == timeSeconds) {
-            entries.back().shape = shape;
-            return;
-        }
-        if (entries.back().shape == shape) return;
+void appendGeneratedKey(LipFile& lip, double time, std::uint8_t shape) {
+    const float t = static_cast<float>(time);
+    if (!std::isfinite(t) || t < 0 || t > lip.durationSeconds || shape > 15)
+        throw std::runtime_error("Generated LIP target is outside the clip.");
+    if (!lip.frames.empty() && t <= lip.frames.back().timeSeconds) {
+        if (t == lip.frames.back().timeSeconds && shape == lip.frames.back().shape) return;
+        throw std::runtime_error("Mouth targets are too close for the LIP timestamp format.");
     }
-    entries.push_back({timeSeconds, shape});
-}
-
-std::vector<KotorVisibleKeyframe> smoothVisibleEntries(
-    std::vector<KotorVisibleKeyframe> entries, const LipQualityOptions& post) {
-    if (entries.empty()) return entries;
-    std::sort(entries.begin(), entries.end(), [](const KotorVisibleKeyframe& a,
-                                                  const KotorVisibleKeyframe& b) {
-        return a.timeSeconds < b.timeSeconds;
-    });
-
-    std::vector<KotorVisibleKeyframe> compact;
-    for (auto entry : entries) {
-        if (entry.shape > 15) entry.shape = 15;
-        if (!compact.empty() && compact.back().timeSeconds == entry.timeSeconds) {
-            compact.back() = entry;
-        } else if (!compact.empty() && compact.back().shape == entry.shape) {
-            continue;
-        } else {
-            compact.push_back(entry);
-        }
-    }
-    if (post.minKeyMs <= 0 || compact.size() <= 2) return compact;
-
-    std::vector<KotorVisibleKeyframe> out;
-    out.reserve(compact.size());
-    out.push_back(compact.front());
-    for (std::size_t i = 1; i < compact.size(); ++i) {
-        const KotorVisibleKeyframe& cur = compact[i];
-        KotorVisibleKeyframe& prev = out.back();
-        const int curMs = lipTimeMs(cur.timeSeconds);
-        const int prevMs = lipTimeMs(prev.timeSeconds);
-        const int gap = curMs - prevMs;
-        if (gap >= post.minKeyMs || cur.shape == 0) {
-            if (prev.shape != cur.shape) out.push_back(cur);
-            continue;
-        }
-
-        const bool curPreserved = post.preserveClosures && isPreservedClosureShape(cur.shape);
-        const bool prevPreserved = post.preserveClosures && isPreservedClosureShape(prev.shape);
-        if (curPreserved) {
-            if (!prevPreserved && prev.shape != 0 && out.size() > 1) {
-                prev = cur;
-            } else if (prev.shape != cur.shape) {
-                out.push_back(cur);
-            }
-        } else if (prevPreserved) {
-            continue;
-        } else {
-            prev = cur;
-        }
-    }
-
-    std::vector<KotorVisibleKeyframe> finalEntries;
-    for (const auto& entry : out) {
-        if (!finalEntries.empty() && finalEntries.back().shape == entry.shape) continue;
-        finalEntries.push_back(entry);
-    }
-    return finalEntries;
-}
-
-std::vector<KotorVisibleKeyframe> phnToKotorVisibleEntries(
-    const PhnFile& phn, const LipQualityOptions& post) {
-    std::vector<KotorVisibleKeyframe> out;
-    std::int16_t lastMouth = -1;
-    int lastStartTime = -1;
-    for (const auto& iv : phn.intervals) {
-        std::int16_t mouth = csluPhoneToKotorShapeOrSkip(iv.label);
-        if (mouth == -1) {
-            if (post.closeOnPause && isRestOrPausePhone(iv.label) &&
-                (iv.endMs - iv.startMs) >= post.closeOnPauseMs) {
-                addVisibleEntry(out, iv.startMs, 0);
-                lastMouth = 0;
-            }
-            continue;
-        }
-        int start = iv.startMs;
-        if (lastMouth == 16) start = lastStartTime;
-        lastMouth = mouth;
-        if (lastMouth == 16) {
-            lastStartTime = iv.startMs;
-            continue;
-        }
-        const std::uint8_t shape = static_cast<std::uint8_t>(lastMouth);
-        start = std::max(0, start - anticipationMsForShape(shape, post));
-        addVisibleEntry(out, start, shape);
-    }
-    return smoothVisibleEntries(std::move(out), post);
+    lip.frames.push_back({t, shape});
 }
 
 } // namespace
@@ -418,9 +346,8 @@ std::vector<KotorVisibleKeyframe> phnToKotorVisibleEntries(
 int resolveTailRestMs(int phnDurationMs, const LipTailRestOptions& options) {
     if (!options.automatic) return std::max(0, options.fixedMs);
     if (phnDurationMs <= 0) return 0;
-    // Stock module lips commonly carry a short final rest beyond the aligned speech.
-    // Auto is intentionally simple and predictable: short barks get 250 ms,
-    // normal dialogue gets 400 ms, and long lines get 500 ms.
+    // Legacy opt-in authoring policy, NOT a requirement of KotOR playback.
+    // Normal product generation keeps fixedMs=0 and does not extend the WAV.
     if (phnDurationMs < 1500) return 250;
     if (phnDurationMs < 8000) return 400;
     return 500;
@@ -450,20 +377,16 @@ void applyLipSmoothingPreset(LipQualityOptions& options, LipSmoothingPreset pres
     options.smoothing = preset;
     switch (preset) {
         case LipSmoothingPreset::None:
-            options.minKeyMs = 0;
-            options.preserveClosures = false;
+            options.maxBlendMs = 10;
             break;
         case LipSmoothingPreset::Light:
-            options.minKeyMs = 40;
-            options.preserveClosures = true;
+            options.maxBlendMs = 40;
             break;
         case LipSmoothingPreset::Medium:
-            options.minKeyMs = 60;
-            options.preserveClosures = true;
+            options.maxBlendMs = 60;
             break;
         case LipSmoothingPreset::Strong:
-            options.minKeyMs = 80;
-            options.preserveClosures = true;
+            options.maxBlendMs = 80;
             break;
     }
 }
@@ -548,23 +471,11 @@ void writeLip(const std::filesystem::path& path, const LipFile& lip) {
     if (!(lip.durationSeconds > 0.0f) || !std::isfinite(lip.durationSeconds)) {
         throw std::runtime_error("LIP duration must be positive and finite");
     }
-    if (lip.frames.front().timeSeconds != 0.0f || lip.frames.front().shape != 0) {
-        throw std::runtime_error("LIP first record must be time 0.0 with shape 0");
-    }
-    for (std::size_t i = 0; i < lip.frames.size(); ++i) {
-        const LipKeyframe& frame = lip.frames[i];
-        if (!std::isfinite(frame.timeSeconds) || frame.timeSeconds < 0.0f) {
-            throw std::runtime_error("LIP record times must be finite and non-negative");
-        }
-        if (frame.shape > 15) {
-            throw std::runtime_error("LIP shape ids must be in the range 0..15");
-        }
-        if (i > 0 && frame.timeSeconds < lip.frames[i - 1].timeSeconds) {
-            throw std::runtime_error("LIP record times must be monotonic");
-        }
-    }
-    if (lip.frames.back().timeSeconds != lip.durationSeconds) {
-        throw std::runtime_error("LIP duration must equal the final record time");
+    const auto validation = validateLipForKotorRuntime(lip);
+    if (!validation.ok) {
+        std::string message = "LIP was not saved. The animation needs explicit repair:";
+        for (const auto& error : validation.errors) message += "\n" + error;
+        throw std::runtime_error(message);
     }
 
     std::ostringstream out(std::ios::out | std::ios::binary);
@@ -581,92 +492,114 @@ void writeLip(const std::filesystem::path& path, const LipFile& lip) {
 
 LipValidation validateLipForKotorRuntime(const LipFile& lip, std::uintmax_t fileSize) {
     LipValidation v;
-    auto error = [&](const std::string& s){ v.ok = false; v.errors.push_back(s); };
-    auto warn = [&](const std::string& s){ v.warnings.push_back(s); };
-    if (!(lip.durationSeconds > 0.0f) || !std::isfinite(lip.durationSeconds)) error("duration field must be positive finite");
-    if (lip.frames.empty()) { error("entry count must be greater than zero"); return v; }
-    if (fileSize != 0) {
-        const std::uintmax_t expected = 16 + 5 * static_cast<std::uintmax_t>(lip.frames.size());
-        if (fileSize != expected) warn("file size is not exactly 16 + 5*entry_count");
+    auto error = [&](const std::string& message) { v.ok = false; v.errors.push_back(message); };
+    auto warn = [&](const std::string& message) { v.warnings.push_back(message); };
+    if (!(lip.durationSeconds > 0.0f) || !std::isfinite(lip.durationSeconds))
+        error("Clip duration must be positive and finite.");
+    if (lip.frames.empty()) { error("At least one mouth key is required."); return v; }
+    if (fileSize != 0 && fileSize != 16 + 5 * static_cast<std::uintmax_t>(lip.frames.size()))
+        error("File size does not match the counted keys.");
+    if (lip.frames.front().timeSeconds != 0.0f) error("The first key must be at time zero.");
+    if (lip.frames.front().shape != 0) warn("The starting pose differs from the usual pose 0; it will be preserved.");
+    if (lip.durationSeconds > 0.0f && std::isfinite(lip.durationSeconds)) {
+        const float lastNorm = lip.frames.back().timeSeconds / lip.durationSeconds;
+        if (!(lastNorm < 1.000010014f && lastNorm > 0.999989986f))
+            error("The final key must match the stored clip duration (within the game's tolerance).");
     }
-    const float firstNorm = lip.frames.front().timeSeconds / lip.durationSeconds;
-    if (!(firstNorm == 0.0f)) error("first record time must normalize to exactly 0.0");
-    if (lip.frames.front().shape != 0) error("first record shape must be the rest shape 0");
-    const float lastNorm = lip.frames.back().timeSeconds / lip.durationSeconds;
-    if (!(lastNorm < 1.000010014f && lastNorm > 0.999989986f)) warn("last record does not normalize to approximately 1.0");
+    bool duplicates = false;
     for (std::size_t i = 0; i < lip.frames.size(); ++i) {
         const auto& k = lip.frames[i];
-        if (!std::isfinite(k.timeSeconds)) error("non-finite record time at index " + std::to_string(i));
-        if (i > 0 && k.timeSeconds < lip.frames[i-1].timeSeconds) warn("non-monotonic record time at index " + std::to_string(i));
-        if (k.shape > 15) warn("shape id outside safe 0..15 at index " + std::to_string(i));
+        if (!std::isfinite(k.timeSeconds) || k.timeSeconds < 0)
+            error("Invalid timestamp at key " + std::to_string(i) + ".");
+        if (i > 0 && k.timeSeconds < lip.frames[i - 1].timeSeconds)
+            error("Descending timestamps at key " + std::to_string(i) + "; saving never sorts them silently.");
+        if (i > 0 && k.timeSeconds == lip.frames[i - 1].timeSeconds) duplicates = true;
+        if (k.shape > 15) error("Pose ID outside 0..15 at key " + std::to_string(i) + ".");
     }
+    if (duplicates) warn("Equal-time keys are preserved. Preview uses the last key at each shared time; game playback can be ambiguous.");
     return v;
 }
 
-std::vector<KotorVisibleKeyframe> readKotorVisibleKeyframes(
-    const std::filesystem::path& path, double* durationSeconds) {
+std::vector<KotorKeyframe> readKotorKeyframes(const std::filesystem::path& path, double* durationSeconds) {
     const LipFile lip = readLip(path);
-    if (lip.frames.front().timeSeconds != 0.0f || lip.frames.front().shape != 0) {
-        throw std::runtime_error(
-            "LIP first record is not the required time 0.0, shape 0 rest record: " +
-            path.string());
-    }
-    if (durationSeconds != nullptr) {
-        *durationSeconds = static_cast<double>(lip.durationSeconds);
-    }
-
-    std::vector<KotorVisibleKeyframe> entries;
-    entries.reserve(lip.frames.size() - 1U);
-    for (std::size_t i = 1; i < lip.frames.size(); ++i) {
-        entries.push_back(
-            {static_cast<double>(lip.frames[i].timeSeconds), lip.frames[i].shape});
-    }
-    if (entries.empty()) {
-        const double duration = static_cast<double>(lip.durationSeconds);
-        entries.push_back({duration > 0.0 ? duration : 0.125, 0});
-    }
+    if (durationSeconds) *durationSeconds = static_cast<double>(lip.durationSeconds);
+    std::vector<KotorKeyframe> entries;
+    entries.reserve(lip.frames.size());
+    for (const auto& frame : lip.frames)
+        entries.push_back({static_cast<double>(frame.timeSeconds), frame.shape});
     return entries;
 }
 
-void normalizeKotorVisibleKeyframes(std::vector<KotorVisibleKeyframe>& entries) {
-    entries.erase(std::remove_if(entries.begin(), entries.end(), [](const auto& entry) {
-        return !std::isfinite(entry.timeSeconds);
-    }), entries.end());
-
-    for (auto& entry : entries) {
-        entry.timeSeconds = std::max(0.0, entry.timeSeconds);
-        entry.shape = static_cast<std::uint8_t>(std::min<int>(entry.shape, 15));
-    }
-    std::stable_sort(entries.begin(), entries.end(), [](const auto& lhs, const auto& rhs) {
-        return lhs.timeSeconds < rhs.timeSeconds;
-    });
-
-    double previous = -1.0;
-    for (auto& entry : entries) {
-        if (previous >= 0.0 && entry.timeSeconds <= previous) {
-            entry.timeSeconds = previous + 0.001;
-        }
-        previous = entry.timeSeconds;
-    }
-    if (entries.empty()) entries.push_back({0.125, 0});
-    entries.back().shape = 0;
+LipFile lipFromKeyframes(const std::vector<KotorKeyframe>& entries, double durationSeconds) {
+    LipFile lip;
+    lip.durationSeconds = static_cast<float>(durationSeconds);
+    lip.frames.reserve(entries.size());
+    for (const auto& entry : entries) lip.frames.push_back({static_cast<float>(entry.timeSeconds), entry.shape});
+    return lip;
 }
 
-void writeKotorVisibleKeyframes(const std::filesystem::path& path,
-                                std::vector<KotorVisibleKeyframe> entries) {
-    normalizeKotorVisibleKeyframes(entries);
-    if (entries.size() > 0xfffffffeull) {
-        throw std::runtime_error("too many visible LIP keyframes");
-    }
+void writeKotorKeyframes(const std::filesystem::path& path,
+                        const std::vector<KotorKeyframe>& entries, double durationSeconds) {
+    // No normalization, sorting, time nudges, hidden keys, duration inference,
+    // or final-pose substitution. Imported float32 values round-trip exactly.
+    writeLip(path, lipFromKeyframes(entries, durationSeconds));
+}
 
-    LipFile lip;
-    lip.durationSeconds = static_cast<float>(entries.back().timeSeconds);
-    lip.frames.reserve(entries.size() + 1U);
-    lip.frames.push_back({0.0f, 0});
-    for (const auto& entry : entries) {
-        lip.frames.push_back({static_cast<float>(entry.timeSeconds), entry.shape});
+void repairKotorKeyframes(std::vector<KotorKeyframe>& entries, double durationSeconds) {
+    const float duration = static_cast<float>(durationSeconds);
+    if (!(duration > 0) || !std::isfinite(duration))
+        throw std::runtime_error("Set a positive finite clip duration before repairing keys.");
+    const auto finalShape = entries.empty() ? std::uint8_t{0} : std::min<std::uint8_t>(entries.back().shape, 15);
+    std::vector<KotorKeyframe> repaired;
+    for (auto entry : entries) {
+        if (!std::isfinite(entry.timeSeconds)) continue;
+        entry.timeSeconds = static_cast<float>(std::clamp(entry.timeSeconds, 0.0, static_cast<double>(duration)));
+        entry.shape = std::min<std::uint8_t>(entry.shape, 15);
+        repaired.push_back(entry);
     }
-    writeLip(path, lip);
+    std::stable_sort(repaired.begin(), repaired.end(), [](const auto& a, const auto& b) { return a.timeSeconds < b.timeSeconds; });
+    std::vector<KotorKeyframe> distinct;
+    for (const auto& key : repaired) {
+        if (!distinct.empty() && distinct.back().timeSeconds == key.timeSeconds) distinct.back() = key;
+        else distinct.push_back(key);
+    }
+    if (distinct.empty() || distinct.front().timeSeconds > 0) distinct.insert(distinct.begin(), {0, 0});
+    if (distinct.back().timeSeconds < duration) distinct.push_back({duration, finalShape});
+    else distinct.back().shape = finalShape;
+    entries = std::move(distinct);
+}
+
+LipPoseBlend sampleLipPose(const LipFile& lip, double timeSeconds) {
+    if (!std::isfinite(timeSeconds)) throw std::runtime_error("Preview time must be finite.");
+    const auto check = validateLipForKotorRuntime(lip);
+    if (!check.ok) throw std::runtime_error("Cannot preview an invalid key curve: " + check.errors.front());
+    LipPoseBlend result;
+    const double time = std::clamp(timeSeconds, 0.0, static_cast<double>(lip.durationSeconds));
+    result.completed = timeSeconds >= lip.durationSeconds;
+    auto upper = std::upper_bound(lip.frames.begin(), lip.frames.end(), time,
+        [](double t, const LipKeyframe& key) { return t < key.timeSeconds; });
+    result.fromIndex = upper == lip.frames.begin() ? 0 : static_cast<std::size_t>(upper - lip.frames.begin() - 1);
+    result.toIndex = upper == lip.frames.end() ? result.fromIndex : static_cast<std::size_t>(upper - lip.frames.begin());
+    if (result.completed) result.fromIndex = result.toIndex = lip.frames.size() - 1;
+    const auto& a = lip.frames[result.fromIndex];
+    const auto& b = lip.frames[result.toIndex];
+    result.fromShape = a.shape; result.toShape = b.shape;
+    result.fromTalkPosition = (a.shape + 1.0) / 16.0;
+    result.toTalkPosition = (b.shape + 1.0) / 16.0;
+    if (result.fromIndex != result.toIndex)
+        result.weight = std::clamp((time - a.timeSeconds) / (b.timeSeconds - a.timeSeconds), 0.0, 1.0);
+    return result;
+}
+
+void simplifyLipHolds(LipFile& lip) {
+    std::vector<LipKeyframe> compact;
+    for (const auto& key : lip.frames) {
+        if (compact.size() >= 2 && compact[compact.size() - 2].shape == key.shape &&
+            compact.back().shape == key.shape && compact[compact.size() - 2].timeSeconds < compact.back().timeSeconds &&
+            compact.back().timeSeconds < key.timeSeconds) compact.back() = key;
+        else compact.push_back(key);
+    }
+    lip.frames = std::move(compact);
 }
 
 std::int16_t csluPhoneToKotorShapeOrSkip(const std::string& phoneIn) {
@@ -692,30 +625,64 @@ std::uint8_t csluPhoneToKotorShape(const std::string& phone) {
     return 0;
 }
 
-void writePhnAsLip(const std::filesystem::path& path, const PhnFile& phn,
-                   LipTailRestOptions tailRest, LipQualityOptions post) {
-    std::vector<KotorVisibleKeyframe> entries = phnToKotorVisibleEntries(phn, post);
-    int durationMs = 125;
-    if (!phn.intervals.empty()) durationMs = std::max(0, phn.intervals.back().endMs);
-    durationMs += resolveTailRestMs(durationMs, tailRest);
-    const double finalTimeSeconds = static_cast<double>(durationMs) / 1000.0;
-
-    if (entries.empty()) {
-        entries.push_back({finalTimeSeconds, 0});
-    } else if (entries.back().timeSeconds == finalTimeSeconds) {
-        entries.back().shape = 0;
-    } else {
-        entries.push_back({finalTimeSeconds, 0});
-    }
-
+LipFile phnToLip(const PhnFile& phn, LipTailRestOptions tailRest, LipQualityOptions post) {
+    auto spans = phonemeSpans(phn, post);
+    const int audioMs = phn.intervals.empty() ? 125 : std::max(1, phn.intervals.back().endMs);
+    const int tailMs = resolveTailRestMs(audioMs, tailRest);
+    if (audioMs > std::numeric_limits<int>::max() - tailMs)
+        throw std::runtime_error("LIP duration exceeds supported range.");
+    const double duration = (audioMs + tailMs) / 1000.0;
     LipFile lip;
-    lip.durationSeconds = static_cast<float>(finalTimeSeconds);
-    lip.frames.reserve(entries.size() + 1U);
-    lip.frames.push_back({0.0f, 0});
-    for (const auto& entry : entries) {
-        lip.frames.push_back({static_cast<float>(entry.timeSeconds), entry.shape});
+    lip.durationSeconds = static_cast<float>(duration);
+    if (spans.empty()) spans.push_back({0, duration, 0});
+    if (spans.front().start > 0 || spans.front().shape != 0)
+        spans.insert(spans.begin(), {0, spans.front().start, 0});
+    if (tailMs > 0) {
+        if (spans.back().shape == 0) spans.back().end = duration;
+        else spans.push_back({audioMs / 1000.0, duration, 0});
     }
-    writeLip(path, lip);
+
+    std::vector<double> arrivals(spans.size(), 0.0);
+    for (std::size_t i = 1; i < spans.size(); ++i) {
+        const auto& previous = spans[i - 1];
+        const auto& current = spans[i];
+        const double desired = current.start - anticipationMsForShape(current.shape, post) / 1000.0;
+        // Any opt-in anticipation is bounded by the predecessor's midpoint and
+        // target arrival. It can never reorder adjacent articulations.
+        const double lower = std::max(arrivals[i - 1], (previous.start + previous.end) / 2.0);
+        arrivals[i] = std::max(desired, lower);
+        if (arrivals[i] <= arrivals[i - 1]) {
+            const double available = current.end - arrivals[i - 1];
+            arrivals[i] = arrivals[i - 1] + std::min(0.005, available / 2.0);
+        }
+        if (!(arrivals[i] < current.end)) throw std::runtime_error("No time remains for a mouth pose target.");
+    }
+
+    // These are authoring policies, not numeric constants recovered from the
+    // game. Both presets preserve every distinct pose and both hold endpoints.
+    // Natural blends over at most 40ms; Minimal over at most 10ms. A transition
+    // never consumes more than half the time between neighboring arrivals.
+    const double transition = (post.maxBlendMs > 0 ? post.maxBlendMs : 10) / 1000.0;
+    for (std::size_t i = 0; i < spans.size(); ++i) {
+        appendGeneratedKey(lip, arrivals[i], spans[i].shape);
+        if (i + 1 < spans.size()) {
+            const double gap = arrivals[i + 1] - arrivals[i];
+            const double holdEnd = arrivals[i + 1] - std::min(transition, gap / 2.0);
+            appendGeneratedKey(lip, holdEnd, spans[i].shape);
+        } else {
+            // Preserve the final spoken pose when there is no trailing silence.
+            appendGeneratedKey(lip, lip.durationSeconds, spans[i].shape);
+        }
+    }
+    simplifyLipHolds(lip);
+    const auto validation = validateLipForKotorRuntime(lip);
+    if (!validation.ok) throw std::runtime_error("Generated invalid LIP: " + validation.errors.front());
+    return lip;
+}
+
+void writePhnAsLip(const std::filesystem::path& path, const PhnFile& phn,
+                   LipTailRestOptions tailRest, LipQualityOptions quality) {
+    writeLip(path, phnToLip(phn, tailRest, quality));
 }
 
 } // namespace cslu

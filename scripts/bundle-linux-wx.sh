@@ -8,13 +8,11 @@ fi
 
 STAGE_ROOT="$(realpath "$1")"
 GUI_PATH="$STAGE_ROOT/bin/NeoLIP"
-BACKEND_PATH="$STAGE_ROOT/bin/neolip_backend"
 LIB_DIR="$STAGE_ROOT/lib/neolip"
 LIBEXEC_DIR="$STAGE_ROOT/libexec/neolip"
 REAL_GUI="$LIBEXEC_DIR/NeoLIP"
-REAL_BACKEND="$LIBEXEC_DIR/neolip_backend"
 
-for required in "$GUI_PATH" "$BACKEND_PATH"; do
+for required in "$GUI_PATH"; do
   if [[ ! -x "$required" ]]; then
     echo "Required NeoLIP executable was not found at: $required" >&2
     exit 2
@@ -48,7 +46,6 @@ for dependency in "${WX_DEPENDENCIES[@]}"; do
 done
 
 mv -- "$GUI_PATH" "$REAL_GUI"
-mv -- "$BACKEND_PATH" "$REAL_BACKEND"
 cat > "$GUI_PATH" <<'WRAPPER'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -60,7 +57,7 @@ BUNDLED_LIB_DIR="$APP_ROOT/lib/neolip"
 export LD_LIBRARY_PATH="$BUNDLED_LIB_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 exec "$APP_ROOT/libexec/neolip/NeoLIP" "$@"
 WRAPPER
-chmod 0755 "$GUI_PATH" "$REAL_GUI" "$REAL_BACKEND"
+chmod 0755 "$GUI_PATH" "$REAL_GUI"
 
 {
   printf 'Bundled wxWidgets runtime libraries for NeoLIP\n'
@@ -82,10 +79,5 @@ while IFS= read -r line; do
     exit 4
   fi
 done < <(awk '$1 ~ /^libwx/ && $2 == "=>" { print }' <<<"$verification")
-
-if [[ ! -x "$REAL_BACKEND" ]]; then
-  echo "The bundled NeoLIP backend is missing: $REAL_BACKEND" >&2
-  exit 5
-fi
 
 printf 'Portable NeoLIP Linux tree prepared under %s\n' "$STAGE_ROOT"

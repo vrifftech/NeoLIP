@@ -54,7 +54,7 @@ struct WavInfo {
     bool isRawMp3 = false;
     bool isKotorStreamCandidate = false;
     bool canDecodeNatively = false;
-    bool requiresExternalDecoder = false;
+    bool requiresExternalDecoder = false; // Legacy metadata field; product never runs a decoder subprocess.
     std::string description;
     std::string warning;
     std::vector<WavChunkInfo> chunks;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include "transcript.hpp"
 #include <map>
 #include <memory>
 #include <string>
@@ -20,7 +21,7 @@ struct TextToNtpOptions {
     std::filesystem::path cmuDictionaryDir;
     std::filesystem::path ogiLexiconPath;
     std::filesystem::path ogiAddendaPath;
-    NtpOutputMode mode = NtpOutputMode::SimpleLinear;
+    NtpOutputMode mode = NtpOutputMode::CsluAutomatic;
     bool customFirst = true;
     bool includeInitialPause = true;
     bool includeFinalPause = true;
@@ -43,6 +44,7 @@ struct WordPronunciationInfo {
 struct TextToNtpResult {
     std::string originalText;
     std::string normalizedText;
+    std::vector<TranscriptToken> tokens; // UTF-8 byte spans in originalText.
     std::vector<std::string> words;
     std::vector<std::string> unknownWords;
     std::vector<std::string> notes;
@@ -61,6 +63,8 @@ public:
     TextToNtpResolver& operator=(const TextToNtpResolver&) = delete;
 
     TextToNtpResult resolveSource(const std::string& textOrFile);
+    // Literal text: never interpret edited dialogue as a filesystem path.
+    TextToNtpResult resolveText(const std::string& text);
 
 private:
     struct Impl;

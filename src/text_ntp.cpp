@@ -1,3 +1,4 @@
+#include "work_control.hpp"
 #include "text_ntp.hpp"
 #include "tsv.hpp"
 
@@ -41,20 +42,11 @@ static std::vector<std::string> splitWhitespace(const std::string& s) {
 static std::string joinWords(const std::vector<std::string>& words, const std::string& sep = " ") {
     std::string out;
     for (std::size_t i = 0; i < words.size(); ++i) {
+        if ((i & 63) == 0) checkWork();
         if (i) out += sep;
         out += words[i];
     }
     return out;
-}
-
-static void replaceAllChar(std::string& s, char target, const std::string& repl) {
-    std::string out;
-    out.reserve(s.size());
-    for (char ch : s) {
-        if (ch == target) out += repl;
-        else out.push_back(ch);
-    }
-    s.swap(out);
 }
 
 static std::string loadTextOrLiteral(const std::string& textOrFile) {
@@ -73,168 +65,14 @@ static std::string loadTextOrLiteral(const std::string& textOrFile) {
     return textOrFile;
 }
 
-static std::string replaceRegexMatches(const std::string& input,
-                                       const std::regex& pattern,
-                                       const std::function<std::string(const std::smatch&)>& replacement) {
-    std::string out;
-    std::size_t last = 0;
-    for (std::sregex_iterator it(input.begin(), input.end(), pattern), end; it != end; ++it) {
-        const std::smatch& m = *it;
-        out.append(input, last, static_cast<std::size_t>(m.position()) - last);
-        out += replacement(m);
-        last = static_cast<std::size_t>(m.position() + m.length());
-    }
-    out.append(input, last, std::string::npos);
-    return out;
-}
-
-static const char* digitWord(char ch) {
-    switch (ch) {
-        case '0': return "zero";
-        case '1': return "one";
-        case '2': return "two";
-        case '3': return "three";
-        case '4': return "four";
-        case '5': return "five";
-        case '6': return "six";
-        case '7': return "seven";
-        case '8': return "eight";
-        case '9': return "nine";
-        default: return "";
-    }
-}
-
-static std::string spelledLetterDigitDesignator(const std::string& token) {
-    std::vector<std::string> pieces;
-    for (char ch : token) {
-        const unsigned char uch = static_cast<unsigned char>(ch);
-        if (std::isalpha(uch)) {
-            pieces.emplace_back(1, static_cast<char>(std::tolower(uch)));
-        } else if (std::isdigit(uch)) {
-            pieces.emplace_back(digitWord(ch));
-        } else if (ch == '-') {
-            continue;
-        } else {
-            return token;
-        }
-    }
-    return pieces.empty() ? token : joinWords(pieces, " ");
-}
-
-static std::string expandLetterDigitDesignators(const std::string& input) {
-    std::string text = input;
-    // KOTOR droid/model names such as HK-47 and T3-M4 should not surface as hk- or t3-m4 stubs.
-    text = replaceRegexMatches(text, std::regex(R"(\b[a-z][0-9]-[a-z][0-9]\b)"),
-                               [](const std::smatch& m) { return std::string(" ") + spelledLetterDigitDesignator(m.str()) + " "; });
-    text = replaceRegexMatches(text, std::regex(R"(\b[a-z]{1,3}-[0-9]{1,3}\b)"),
-                               [](const std::smatch& m) { return std::string(" ") + spelledLetterDigitDesignator(m.str()) + " "; });
-    text = replaceRegexMatches(text, std::regex(R"(\b[a-z]{1,3}[0-9]{1,3}\b)"),
-                               [](const std::smatch& m) { return std::string(" ") + spelledLetterDigitDesignator(m.str()) + " "; });
-    return text;
-}
-
-static std::string expandRomanNumeralTokens(const std::string& input) {
-    static const std::map<std::string, std::string> roman = {
-        {"i", "one"}, {"ii", "two"}, {"iii", "three"}, {"iv", "four"}, {"v", "five"},
-        {"vi", "six"}, {"vii", "seven"}, {"viii", "eight"}, {"ix", "nine"}, {"x", "ten"}
-    };
-    return replaceRegexMatches(input, std::regex(R"(\b[ivx]{1,4}\b)"),
-                               [](const std::smatch& m) {
-                                   const std::string key = m.str();
-                                   const auto it = roman.find(key);
-                                   return it == roman.end() ? key : std::string(" ") + it->second + " ";
-                               });
-}
-
-static std::string expandCommonApostrophes(std::string text) {
-    // Normalize the common UTF-8 curly apostrophe byte sequence to ASCII apostrophe.
-    const std::string curly = "\xE2\x80\x99";
-    std::size_t pos = 0;
-    while ((pos = text.find(curly, pos)) != std::string::npos) {
-        text.replace(pos, curly.size(), "'");
-        ++pos;
-    }
-
-    const std::pair<const char*, const char*> contractions[] = {
-        {R"(\bwon't\b)", "will not"}, {R"(\bcan't\b)", "can not"},
-        {R"(n't\b)", " not"}, {R"('re\b)", " are"}, {R"('ve\b)", " have"},
-        {R"('ll\b)", " will"}, {R"('d\b)", " would"}, {R"('m\b)", " am"}
-    };
-    for (const auto& c : contractions) text = std::regex_replace(text, std::regex(c.first), c.second);
-    return text;
-}
-
-static bool looksLikeResourceToken(const std::string& token) {
-    bool hasAlpha = false;
-    bool hasUnderscore = false;
-    for (char ch : token) {
-        const unsigned char uch = static_cast<unsigned char>(ch);
-        hasAlpha = hasAlpha || std::isalpha(uch);
-        hasUnderscore = hasUnderscore || ch == '_';
-    }
-    if (hasAlpha && hasUnderscore) return true;
-    const std::string lower = toLowerAscii(token);
-    const std::vector<std::string> resourceExts = {".dlg", ".utc", ".utp", ".uti", ".utd", ".utm", ".ncs", ".nss", ".2da", ".tlk", ".wav", ".mp3"};
-    for (const std::string& ext : resourceExts) {
-        if (lower.size() >= ext.size() && lower.compare(lower.size() - ext.size(), ext.size(), ext) == 0) return true;
-    }
-    return false;
-}
-
 static std::string csluNormalizeText(const std::string& original,
                                      std::vector<std::string>& words,
+                                     std::vector<TranscriptToken>& tokens,
                                      const TextToNtpOptions& options) {
-    std::string prepared = original;
-    prepared = std::regex_replace(prepared, std::regex("<[^>]+>"), " ");
-    if (options.cleanupTlkMarkup) {
-        // Skill/result tags in TLK/DLG text are UI markup, not spoken words.
-        prepared = std::regex_replace(prepared, std::regex(R"(\[[A-Za-z][A-Za-z0-9 _/+.-]{0,63}\])"), " ");
-        if (options.stripBraceStageDirections) {
-            prepared = std::regex_replace(prepared, std::regex(R"(\{[^}]*\})"), " ");
-        } else {
-            replaceAllChar(prepared, '{', " ");
-            replaceAllChar(prepared, '}', " ");
-        }
-    }
-
-    std::vector<std::string> lower;
-    for (const std::string& word0 : splitWhitespace(prepared)) {
-        if (options.cleanupTlkMarkup && looksLikeResourceToken(word0)) continue;
-        std::string word = toLowerAscii(word0);
-        if (!word.empty() && word[0] == '.') {
-            if (word != ".pau" && word != ".garbage") continue;
-        }
-        lower.push_back(word);
-    }
-    std::string text = joinWords(lower, " ");
-
-    text = expandCommonApostrophes(text);
-    text = expandLetterDigitDesignators(text);
-    text = expandRomanNumeralTokens(text);
-
-    replaceAllChar(text, '"', " ");
-    replaceAllChar(text, ',', " ");
-    replaceAllChar(text, '?', " ");
-    replaceAllChar(text, '!', " ");
-    replaceAllChar(text, '.', " ");
-    replaceAllChar(text, ';', " ");
-    replaceAllChar(text, ':', " ");
-    replaceAllChar(text, '(', " ");
-    replaceAllChar(text, ')', " ");
-    replaceAllChar(text, '/', " ");
-    replaceAllChar(text, '[', " ");
-    replaceAllChar(text, ']', " ");
-    replaceAllChar(text, '{', " ");
-    replaceAllChar(text, '}', " ");
-    replaceAllChar(text, '\\', " ");
-
-    struct DigitMap { char d; const char* w; } maps[] = {
-        {'1', " one "}, {'2', " two "}, {'3', " three "}, {'4', " four "}, {'5', " five "},
-        {'6', " six "}, {'7', " seven "}, {'8', " eight "}, {'9', " nine "}, {'0', " zero "}
-    };
-    for (const auto& m : maps) replaceAllChar(text, m.d, m.w);
-
-    words = splitWhitespace(text);
+    tokens = tokenizeTranscript(original, options.cleanupTlkMarkup,
+                                options.stripBraceStageDirections);
+    words.clear();
+    for (const auto& token : tokens) words.push_back(token.word);
     return joinWords(words, " ");
 }
 
@@ -371,6 +209,7 @@ static std::vector<std::string> tokenizePronExpression(const std::string& s) {
 static std::size_t findMatching(const std::vector<std::string>& toks, std::size_t open, const std::string& closeTok) {
     int depth = 0;
     for (std::size_t i = open; i < toks.size(); ++i) {
+        if ((i & 63) == 0) checkWork();
         if (toks[i] == "(" || toks[i] == "[") ++depth;
         else if (toks[i] == ")" || toks[i] == "]") {
             --depth;
@@ -387,6 +226,7 @@ static std::vector<std::pair<std::size_t, std::size_t>> splitTopLevelAlternative
     int depth = 0;
     std::size_t start = begin;
     for (std::size_t i = begin; i < end; ++i) {
+        if ((i & 63) == 0) checkWork();
         if (toks[i] == "(" || toks[i] == "[") ++depth;
         else if (toks[i] == ")" || toks[i] == "]") --depth;
         else if (toks[i] == "|" && depth == 0) {
@@ -404,6 +244,7 @@ static std::vector<std::string> flattenPronTokens(const std::vector<std::string>
     std::size_t aEnd = alts.front().second;
     std::vector<std::string> out;
     for (std::size_t i = aBegin; i < aEnd; ++i) {
+        if ((i & 63) == 0) checkWork();
         if (toks[i] == "(") {
             const std::size_t j = findMatching(toks, i, ")");
             if (j == toks.size()) continue;
@@ -436,6 +277,7 @@ static bool extractFirstQuotedString(const std::string& text, std::string& value
     value.clear();
     bool esc = false;
     for (std::size_t i = q + 1; i < text.size(); ++i) {
+        if ((i & 63) == 0) checkWork();
         const char ch = text[i];
         if (esc) {
             if (ch == 'n') value.push_back('\n');
@@ -499,6 +341,7 @@ static std::vector<std::string> extractBalancedLexAddEntryChunks(const std::stri
         bool inString = false;
         bool esc = false;
         for (std::size_t i = start; i < text.size(); ++i) {
+            if ((i & 63) == 0) checkWork();
             const char ch = text[i];
             if (inString) {
                 if (esc) esc = false;
@@ -596,11 +439,18 @@ private:
     std::map<std::string, PronEntry> addenda_;
 };
 
-static std::string csluAutomaticFormat(const std::vector<std::pair<std::string, std::string>>& wordPron) {
+static std::string csluAutomaticFormat(
+        const std::vector<std::pair<std::string, std::string>>& wordPron,
+        bool includeInitialPause,
+        bool includeFinalPause) {
     std::vector<std::string> elements;
-    elements.push_back("[.pau]");
+    if (includeInitialPause) {
+        elements.push_back("[.pau]");
+    }
     std::size_t counter = 0;
-    for (const auto& wp : wordPron) {
+    for (std::size_t i = 0; i < wordPron.size(); ++i) {
+        if ((i & 63) == 0) checkWork();
+        const auto& wp = wordPron[i];
         const std::string& word = wp.first;
         std::string phones = wp.second;
         if (word == ".pau" && counter == 0) elements.clear();
@@ -608,7 +458,10 @@ static std::string csluAutomaticFormat(const std::vector<std::pair<std::string, 
         if (word == ".pau") phones = ".pau";
         if (word == ".garbage") phones = ".garbage";
         elements.push_back(phones);
-        if (word != ".pau") elements.push_back("[.pau]");
+        const bool isLastWord = i + 1 == wordPron.size();
+        if (word != ".pau" && (!isLastWord || includeFinalPause)) {
+            elements.push_back("[.pau]");
+        }
     }
     return joinWords(elements, " ");
 }
@@ -1107,7 +960,7 @@ TextToNtpOptions makeDefaultTextToNtpOptions(const std::filesystem::path& faRoot
         options = std::move(legacy);
     }
 
-    options.mode = NtpOutputMode::SimpleLinear;
+    options.mode = NtpOutputMode::CsluAutomatic;
     options.customFirst = true;
     options.useOgiLexicon = true;
     options.useOgiAddenda = true;
@@ -1126,14 +979,15 @@ struct TextToNtpResolver::Impl {
         builtinCustom = readCustomDictionary(options.customDictionary, sourceNameForPath("custom", options.customDictionary));
     }
 
-    TextToNtpResult resolve(const std::string& textOrFile) {
+    TextToNtpResult resolve(const std::string& text, bool literal = false) {
         TextToNtpResult r;
-        r.originalText = loadTextOrLiteral(textOrFile);
-        r.normalizedText = csluNormalizeText(r.originalText, r.words, options);
+        r.originalText = literal ? text : loadTextOrLiteral(text);
+        r.normalizedText = csluNormalizeText(r.originalText, r.words, r.tokens, options);
 
         std::vector<std::pair<std::string, std::string>> wordPron;
         wordPron.reserve(r.words.size());
         for (std::size_t i = 0; i < r.words.size(); ++i) {
+            if ((i & 63) == 0) checkWork();
             const std::string& word = r.words[i];
             PronEntry entry;
             if (lookupPronunciation(word, overrideMaps, builtinCustom, cmu, ogi, options, entry)) {
@@ -1154,7 +1008,10 @@ struct TextToNtpResolver::Impl {
         }
 
         if (options.mode == NtpOutputMode::CsluAutomatic) {
-            r.ntp = csluAutomaticFormat(wordPron);
+            r.ntp = csluAutomaticFormat(
+                wordPron,
+                options.includeInitialPause,
+                options.includeFinalPause);
         } else {
             r.ntp = simpleLinearFormat(wordPron, options.includeInitialPause, options.includeFinalPause);
         }
@@ -1175,6 +1032,10 @@ TextToNtpResolver::TextToNtpResolver(TextToNtpResolver&&) noexcept = default;
 TextToNtpResolver& TextToNtpResolver::operator=(TextToNtpResolver&&) noexcept = default;
 TextToNtpResult TextToNtpResolver::resolveSource(const std::string& textOrFile) {
     return impl_->resolve(textOrFile);
+}
+
+TextToNtpResult TextToNtpResolver::resolveText(const std::string& text) {
+    return impl_->resolve(text, true);
 }
 
 TextToNtpResult textToNtpFromSource(const std::string& textOrFile, const TextToNtpOptions& options) {

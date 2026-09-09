@@ -1,11 +1,11 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.18)
 
 if(POLICY CMP0091)
     cmake_policy(SET CMP0091 NEW)
 endif()
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "MSVC runtime library" FORCE)
 
-project(NeoLIP VERSION 0.3.12 LANGUAGES CXX)
+project(NeoLIP VERSION 1.0.0 LANGUAGES CXX)
 set(NEOSHARED_ROOT "" CACHE PATH
     "Path to the neoshared source repository; defaults to ../neoshared")
 
@@ -72,6 +72,11 @@ set(NEOLIP_APP_PHASE_STRING "0")
 
 option(NEOLIP_BUILD_WX_GUI "Build the NeoLIP wxWidgets desktop application" ON)
 option(NEOLIP_REQUIRE_WX_GUI "Fail configure if wxWidgets is unavailable while NEOLIP_BUILD_WX_GUI is ON" ON)
+option(NEOLIP_BUILD_CLI "Build the optional command-line automation frontend (not packaged)" OFF)
+option(NEOLIP_BUILD_TESTS "Build engine and native GUI regression tests (not packaged)" OFF)
+if(NEOLIP_BUILD_TESTS)
+    enable_testing()
+endif()
 
 # Backward-compatible aliases for older build scripts.
 if(DEFINED CSLU_BUILD_WX_GUI)
@@ -84,12 +89,18 @@ endif()
 function(neolip_force_static_msvc_runtime target_name)
     if(MSVC AND TARGET ${target_name})
         set_property(TARGET ${target_name} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-        target_compile_options(${target_name} PRIVATE
+        target_compile_options(${target_name} PRIVATE /utf-8
             $<$<CONFIG:Debug>:/MTd>
             $<$<NOT:$<CONFIG:Debug>>:/MT>
         )
     endif()
 endfunction()
+
+if(NOT TARGET neoshared::dlg)
+    message(FATAL_ERROR "NeoLIP dialogue batches require an updated NeoShared with neoshared::dlg. Update NEOSHARED_REF before building.")
+endif()
+
+include(cmake/NeoAudio.cmake)
 
 set(NEOLIP_CORE_SOURCES
     src/tsv.cpp
@@ -98,10 +109,16 @@ set(NEOLIP_CORE_SOURCES
     src/lip.cpp
     src/feature_context.cpp
     src/wav.cpp
+    src/audio.cpp
+    src/audio_codecs.cpp
+    src/playback_core.cpp
+    src/fingerprint.cpp
+    src/review.cpp
     src/raw_frontend.cpp
     src/backend.cpp
     src/graph_build.cpp
     src/text_ntp.cpp
+    src/transcript.cpp
 )
 
 set(NEOLIP_COMMON_DEFINITIONS
@@ -113,6 +130,7 @@ set(NEOLIP_COMMON_DEFINITIONS
 
 add_library(neolip_core STATIC ${NEOLIP_CORE_SOURCES})
 target_include_directories(neolip_core PUBLIC src)
+target_link_libraries(neolip_core PUBLIC neolip_audio_codec)
 target_compile_features(neolip_core PUBLIC cxx_std_17)
 if(MSVC)
     target_compile_options(neolip_core PRIVATE /W4 /permissive- /Zc:__cplusplus)
@@ -122,6 +140,33 @@ else()
 endif()
 neolip_force_static_msvc_runtime(neolip_core)
 neo_apply_minimal_release(neolip_core)
+
+
+add_library(neolip_engine STATIC src/engine.cpp src/dialogue_batch.cpp)
+add_library(neolip_playback STATIC src/playback_device.cpp)
+target_link_libraries(neolip_playback PUBLIC neolip_core)
+neolip_force_static_msvc_runtime(neolip_playback)
+target_include_directories(neolip_engine PUBLIC src)
+target_link_libraries(neolip_engine PUBLIC neolip_core neoshared::dlg neoshared::tlk)
+target_compile_features(neolip_engine PUBLIC cxx_std_17)
+if(NOT EMSCRIPTEN)
+    find_package(Threads REQUIRED)
+    target_link_libraries(neolip_engine PUBLIC Threads::Threads)
+endif()
+if(MSVC)
+    target_compile_options(neolip_engine PRIVATE /W4 /permissive- /Zc:__cplusplus)
+    target_compile_definitions(neolip_engine PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX)
+else()
+    target_compile_options(neolip_engine PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+neolip_force_static_msvc_runtime(neolip_engine)
+neo_apply_minimal_release(neolip_engine)
+if(NEOLIP_BUILD_CLI)
+    add_executable(neolip_cli src/main.cpp)
+    target_link_libraries(neolip_cli PRIVATE neolip_engine)
+    target_compile_definitions(neolip_cli PRIVATE ${NEOLIP_COMMON_DEFINITIONS})
+    neolip_force_static_msvc_runtime(neolip_cli)
+endif()
 
 
 # Runtime assets are installed only when the desktop application target exists.
@@ -297,22 +342,6 @@ if(NEOLIP_BUILD_WX_GUI)
     endif()
 
     if(NEOLIP_GUI_WX_FOUND)
-        # The GUI runs long alignment jobs out of process so they can be cancelled
-        # safely. This worker is an internal companion, not a supported CLI product.
-        add_executable(neolip_backend src/main.cpp)
-        target_include_directories(neolip_backend PRIVATE src)
-        target_compile_definitions(neolip_backend PRIVATE ${NEOLIP_COMMON_DEFINITIONS} NEOLIP_PRIVATE_BACKEND=1)
-        target_link_libraries(neolip_backend PRIVATE neolip_core neoshared::tlk)
-        target_compile_features(neolip_backend PRIVATE cxx_std_17)
-        if(MSVC)
-            target_compile_options(neolip_backend PRIVATE /W4 /permissive- /Zc:__cplusplus)
-            target_compile_definitions(neolip_backend PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX)
-        else()
-            target_compile_options(neolip_backend PRIVATE -Wall -Wextra -Wpedantic)
-        endif()
-        neolip_force_static_msvc_runtime(neolip_backend)
-        neo_apply_minimal_release(neolip_backend)
-
         set(NEOLIP_WX_SOURCES src/gui/wx_main.cpp)
         if(WIN32)
             list(APPEND NEOLIP_WX_SOURCES resources/neolip.rc)
@@ -343,7 +372,7 @@ if(NEOLIP_BUILD_WX_GUI)
         )
         target_include_directories(NeoLIP PRIVATE src)
         target_compile_definitions(NeoLIP PRIVATE ${NEOLIP_COMMON_DEFINITIONS})
-        target_link_libraries(NeoLIP PRIVATE neolip_core neoshared::wx)
+        target_link_libraries(NeoLIP PRIVATE neolip_engine neoshared::wx)
         if(NEOLIP_GUI_WX_MANUAL)
             target_include_directories(NeoLIP SYSTEM PRIVATE ${NEOLIP_GUI_WX_INCLUDE_DIRS})
             target_compile_definitions(NeoLIP PRIVATE ${NEOLIP_GUI_WX_DEFINITIONS})
@@ -360,6 +389,58 @@ if(NEOLIP_BUILD_WX_GUI)
         endif()
         neolip_force_static_msvc_runtime(NeoLIP)
         neo_apply_minimal_release(NeoLIP)
+        if(APPLE)
+            set(_neolip_build_assets "$<TARGET_BUNDLE_DIR:NeoLIP>/Contents/Resources")
+        else()
+            set(_neolip_build_assets "$<TARGET_FILE_DIR:NeoLIP>")
+        endif()
+        if(NOT EMSCRIPTEN)
+            add_custom_command(TARGET NeoLIP POST_BUILD
+                COMMAND "${CMAKE_COMMAND}" -E copy_directory
+                    "${NEOLIP_BUNDLED_DICTIONARY_ROOT}" "${_neolip_build_assets}/dictionaries"
+                COMMAND "${CMAKE_COMMAND}" -E copy_directory
+                    "${NEOLIP_CSLU_FA_DIR}/bc_16k" "${_neolip_build_assets}/models/bc_16k"
+                COMMAND "${CMAKE_COMMAND}" -E copy_directory
+                    "${NEOLIP_CSLU_FA_DIR}/trans_16k" "${_neolip_build_assets}/models/trans_16k"
+                COMMAND "${CMAKE_COMMAND}" -E copy
+                    "${NEOLIP_CSLU_FA_DIR}/phonemes_new_16k.train.spec"
+                    "${NEOLIP_CSLU_FA_DIR}/phonemes_new_16k.parts"
+                    "${_neolip_build_assets}/models/"
+                VERBATIM)
+        endif()
+        target_link_libraries(NeoLIP PRIVATE neolip_playback)
+        if(NEOLIP_BUILD_TESTS AND NOT EMSCRIPTEN)
+            # Separate executable: no test switch or test code enters NeoLIP.
+            if(WIN32)
+                add_executable(neolip_ui_tests WIN32 src/gui/wx_main.cpp)
+            else()
+                add_executable(neolip_ui_tests src/gui/wx_main.cpp)
+            endif()
+            foreach(_property INCLUDE_DIRECTORIES COMPILE_DEFINITIONS COMPILE_OPTIONS LINK_LIBRARIES)
+                get_target_property(_value NeoLIP ${_property})
+                if(_value)
+                    set_property(TARGET neolip_ui_tests PROPERTY ${_property} "${_value}")
+                endif()
+            endforeach()
+            target_compile_definitions(neolip_ui_tests PRIVATE NEOLIP_UI_SMOKE_TEST=1
+                NEOLIP_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+                NEOLIP_TEST_APP_EXECUTABLE="$<TARGET_FILE:NeoLIP>")
+            neolip_force_static_msvc_runtime(neolip_ui_tests)
+            if(UNIX AND NOT APPLE)
+                find_program(NEOLIP_XVFB_RUN xvfb-run)
+                if(NEOLIP_XVFB_RUN)
+                    add_test(NAME neolip_ui_tests COMMAND "${NEOLIP_XVFB_RUN}" -a
+                        -s "-screen 0 1400x1000x24" $<TARGET_FILE:neolip_ui_tests>)
+                else()
+                    message(STATUS "Install xvfb and xauth to run the native GUI smoke test")
+                endif()
+            else()
+                add_test(NAME neolip_ui_tests COMMAND neolip_ui_tests)
+            endif()
+            if(TEST neolip_ui_tests)
+                set_tests_properties(neolip_ui_tests PROPERTIES TIMEOUT 180)
+            endif()
+        endif()
         if(WIN32)
             set(NEOLIP_RUNTIME_DESTINATION ".")
         else()
@@ -369,13 +450,9 @@ if(NEOLIP_BUILD_WX_GUI)
             BUNDLE DESTINATION .
             RUNTIME DESTINATION "${NEOLIP_RUNTIME_DESTINATION}")
         if(APPLE)
-            install(TARGETS neolip_backend
-                RUNTIME DESTINATION "NeoLIP.app/Contents/MacOS")
             set(NEOLIP_DATA_PREFIX "NeoLIP.app/Contents/Resources/")
             set(NEOLIP_DATA_ROOT "NeoLIP.app/Contents/Resources")
         else()
-            install(TARGETS neolip_backend
-                RUNTIME DESTINATION "${NEOLIP_RUNTIME_DESTINATION}")
             set(NEOLIP_DATA_PREFIX "")
             set(NEOLIP_DATA_ROOT ".")
         endif()
@@ -393,6 +470,8 @@ if(NEOLIP_BUILD_WX_GUI)
                 DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications)
         endif()
 
+        install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/licenses/miniaudio.txt"
+            DESTINATION "${NEOLIP_DATA_PREFIX}licenses")
         install(DIRECTORY "${NEOLIP_BUNDLED_DICTIONARY_ROOT}/"
             DESTINATION "${NEOLIP_DATA_PREFIX}dictionaries")
         install(FILES
@@ -424,62 +503,64 @@ else()
 endif()
 
 
-# NeoLIP in-process browser backend and media compatibility
-# The desktop companion target remains unchanged. For Emscripten, its sources
-# are compiled into the GUI and main() is renamed in a generated wrapper.
-include_directories("${CMAKE_CURRENT_SOURCE_DIR}/wasm")
-if(EMSCRIPTEN)
+# Browser media/export only. The same engine is linked directly on every target.
+if(EMSCRIPTEN AND TARGET NeoLIP)
     target_sources(NeoLIP PRIVATE wasm/neolip_wasm_runtime.cpp)
+    target_include_directories(NeoLIP PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/wasm")
     target_link_options(NeoLIP PRIVATE
-        "-sASYNCIFY=1"
-        "-sASYNCIFY_STACK_SIZE=1048576"
-    )
+        "-sASYNCIFY=1" "-sASYNCIFY_STACK_SIZE=1048576")
+endif()
 
-    if(NOT TARGET neolip_backend)
-        message(FATAL_ERROR "NeoLIP WASM requires the neolip_backend target")
-    endif()
+if(NEOLIP_BUILD_TESTS)
+    enable_testing()
+    add_executable(neolip_engine_tests tests/engine_tests.cpp)
+    target_link_libraries(neolip_engine_tests PRIVATE neolip_engine)
+    neolip_force_static_msvc_runtime(neolip_engine_tests)
+    add_test(NAME neolip_engine_tests COMMAND neolip_engine_tests "${CMAKE_CURRENT_SOURCE_DIR}")
+endif()
 
-    get_target_property(_neolip_backend_sources neolip_backend SOURCES)
-    set(_neolip_backend_main "")
-    set(_neolip_backend_embedded_sources "")
-    foreach(_source IN LISTS _neolip_backend_sources)
-        if(_source MATCHES "(^|/)main\\.(c|cc|cpp|cxx)$")
-            set(_neolip_backend_main "${_source}")
-        elseif(_source MATCHES "\\.(c|cc|cpp|cxx)$")
-            list(APPEND _neolip_backend_embedded_sources "${_source}")
-        endif()
-    endforeach()
-    if(NOT _neolip_backend_main)
-        message(FATAL_ERROR "Could not locate neolip_backend main source")
-    endif()
+if(NEOLIP_BUILD_TESTS)
+    add_executable(neolip_lip_tests tests/lip_tests.cpp)
+    target_link_libraries(neolip_lip_tests PRIVATE neolip_engine)
+    neolip_force_static_msvc_runtime(neolip_lip_tests)
+    add_test(NAME neolip_lip_tests COMMAND neolip_lip_tests)
+endif()
 
-    if(NOT IS_ABSOLUTE "${_neolip_backend_main}")
-        set(_neolip_backend_main "${CMAKE_CURRENT_SOURCE_DIR}/${_neolip_backend_main}")
-    endif()
-    file(TO_CMAKE_PATH "${_neolip_backend_main}" _neolip_backend_main)
-    set(_neolip_embedded_main "${CMAKE_CURRENT_BINARY_DIR}/neolip_backend_embedded_main.cpp")
-    file(GENERATE OUTPUT "${_neolip_embedded_main}" CONTENT
-        "#define main neolip_backend_main\n#include \"${_neolip_backend_main}\"\n")
+if(NEOLIP_BUILD_TESTS)
+    add_executable(neolip_polish_tests tests/polish_tests.cpp)
+    target_link_libraries(neolip_polish_tests PRIVATE neolip_engine)
+    neolip_force_static_msvc_runtime(neolip_polish_tests)
+    add_test(NAME neolip_polish_tests COMMAND neolip_polish_tests "${CMAKE_CURRENT_SOURCE_DIR}")
+endif()
 
-    target_sources(NeoLIP PRIVATE
-        ${_neolip_backend_embedded_sources}
-        "${_neolip_embedded_main}"
-    )
+if(NEOLIP_BUILD_TESTS)
+    add_executable(neolip_workflow_tests tests/workflow_tests.cpp)
+    target_link_libraries(neolip_workflow_tests PRIVATE neolip_engine)
+    neolip_force_static_msvc_runtime(neolip_workflow_tests)
+    add_test(NAME neolip_workflow_tests COMMAND neolip_workflow_tests "${CMAKE_CURRENT_SOURCE_DIR}")
+endif()
 
-    foreach(_property IN ITEMS INCLUDE_DIRECTORIES COMPILE_DEFINITIONS COMPILE_OPTIONS)
-        get_target_property(_value neolip_backend ${_property})
-        if(_value AND NOT _value MATCHES "-NOTFOUND$")
-            if(_property STREQUAL "INCLUDE_DIRECTORIES")
-                target_include_directories(NeoLIP PRIVATE ${_value})
-            elseif(_property STREQUAL "COMPILE_DEFINITIONS")
-                target_compile_definitions(NeoLIP PRIVATE ${_value})
-            elseif(_property STREQUAL "COMPILE_OPTIONS")
-                target_compile_options(NeoLIP PRIVATE ${_value})
-            endif()
-        endif()
-    endforeach()
-    get_target_property(_neolip_backend_links neolip_backend LINK_LIBRARIES)
-    if(_neolip_backend_links AND NOT _neolip_backend_links MATCHES "-NOTFOUND$")
-        target_link_libraries(NeoLIP PRIVATE ${_neolip_backend_links})
-    endif()
+if(NEOLIP_BUILD_TESTS AND NOT EMSCRIPTEN)
+    # Compile the real device integration against the pinned miniaudio header.
+    # The null output requires no sound card on hosted CI and is not shipped.
+    add_executable(neolip_device_tests tests/device_tests.cpp src/playback_device.cpp)
+    target_compile_definitions(neolip_device_tests PRIVATE NEOLIP_AUDIO_TEST_NULL_DEVICE=1)
+    target_link_libraries(neolip_device_tests PRIVATE neolip_engine neolip_audio_codec)
+    neolip_force_static_msvc_runtime(neolip_device_tests)
+    add_test(NAME neolip_device_tests COMMAND neolip_device_tests)
+    set_tests_properties(neolip_device_tests PROPERTIES TIMEOUT 20)
+endif()
+
+option(NEOLIP_BUILD_BENCHMARKS "Build non-installed engineering comparison tools" OFF)
+if(NEOLIP_BUILD_BENCHMARKS)
+    add_executable(neolip_quality_benchmark tests/quality_benchmark.cpp)
+    target_link_libraries(neolip_quality_benchmark PRIVATE neolip_engine)
+    neolip_force_static_msvc_runtime(neolip_quality_benchmark)
+endif()
+
+if(NEOLIP_BUILD_TESTS)
+    add_executable(neolip_dialogue_tests tests/dialogue_tests.cpp)
+    target_link_libraries(neolip_dialogue_tests PRIVATE neolip_engine)
+    neolip_force_static_msvc_runtime(neolip_dialogue_tests)
+    add_test(NAME neolip_dialogue_tests COMMAND neolip_dialogue_tests "${CMAKE_CURRENT_SOURCE_DIR}")
 endif()

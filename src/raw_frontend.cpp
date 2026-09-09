@@ -1,6 +1,8 @@
+#include "work_control.hpp"
 #include "raw_frontend.hpp"
 #include "feature_context.hpp"
 #include "wav.hpp"
+#include "audio.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -22,39 +24,10 @@
 #include <cstdlib>
 #include <sstream>
 
-#ifdef _WIN32
-#include <process.h>
-#else
-#include <spawn.h>
-#include <sys/wait.h>
-#endif
-
-#ifndef _WIN32
-extern char** environ;
-#endif
-
 namespace cslu {
 namespace {
 
 constexpr double kPi = 3.141592653589793238462643383279502884;
-
-std::uint16_t le16(const unsigned char* p) {
-    return static_cast<std::uint16_t>(p[0] | (p[1] << 8));
-}
-
-std::uint32_t le32(const unsigned char* p) {
-    return static_cast<std::uint32_t>(p[0] |
-                                      (p[1] << 8) |
-                                      (p[2] << 16) |
-                                      (p[3] << 24));
-}
-
-void readExact(std::ifstream& in, char* dst, std::streamsize n, const std::string& what) {
-    in.read(dst, n);
-    if (in.gcount() != n) {
-        throw std::runtime_error("unexpected EOF while reading " + what);
-    }
-}
 
 std::vector<double> hammingSquared(int n, double& sumHamming) {
     if (n <= 1) {
@@ -64,6 +37,7 @@ std::vector<double> hammingSquared(int n, double& sumHamming) {
     std::vector<double> w(static_cast<std::size_t>(n));
     sumHamming = 0.0;
     for (int i = 0; i < n; ++i) {
+        if ((i & 63) == 0) checkWork();
         const double h = 0.54 - 0.46 * std::cos(twoPi * static_cast<double>(i) / static_cast<double>(n - 1));
         sumHamming += h;
         w[static_cast<std::size_t>(i)] = h * h;
@@ -381,6 +355,7 @@ std::vector<double> computeDeltaCsluPartial(const std::vector<double>& input, in
         return out;
     }
     for (std::size_t r = 0; r < input.size(); ++r) {
+        if ((r & 63) == 0) checkWork();
         double numerator = 0.0;
         double denom = 0.0;
         for (int k = 1; k <= deltaFrames; ++k) {
@@ -412,6 +387,7 @@ std::vector<double> csluFir64(const std::vector<double>& input, const std::array
     std::array<double, 64> ring{};
     ring.fill(input.front());
     for (std::size_t i = 0; i < input.size(); ++i) {
+        if ((i & 63) == 0) checkWork();
         ring[i % ring.size()] = input[i];
         double acc = 0.0;
         std::size_t idx = (i + 1U) % ring.size();
@@ -438,6 +414,7 @@ std::vector<double> burstFir64(const std::vector<double>& input, const std::arra
     }
     std::array<double, N> ring{};
     for (std::size_t i = 0; i < N; ++i) {
+        if ((i & 63) == 0) checkWork();
         ring[i] = (i < input.size()) ? input[i] : 0.0;
     }
     std::size_t phase = N;
@@ -497,6 +474,7 @@ struct IntensityBandResult {
 IntensityBandResult computeIntensityBand(const std::vector<double>& signal) {
     std::vector<double> squared(signal.size(), 0.0);
     for (std::size_t i = 0; i < signal.size(); ++i) {
+        if ((i & 63) == 0) checkWork();
         squared[i] = signal[i] * signal[i];
     }
     const std::vector<double> smallLog = intensityWindowLogEnergy(
@@ -510,6 +488,7 @@ IntensityBandResult computeIntensityBand(const std::vector<double>& signal) {
     constexpr double negLimit = -10.0;
     constexpr double posLimit = 10.0;
     for (std::size_t r = 0; r < out.value.size(); ++r) {
+        if ((r & 63) == 0) checkWork();
         const double denom = (r < largeLog.size()) ? largeLog[r] : largeLog.back();
         const double ratio = smallDelta[r] / denom + 1.0;
         double v = (ratio > 0.0) ? (10.0 * std::log10(ratio)) : negLimit;
@@ -566,6 +545,7 @@ std::vector<double> computeBurstBandIntermediate(const std::vector<double>& samp
         // row affects the last partial-delta frames used by burst_mx's
         // diagnostic band columns.
         for (std::size_t i = 0; i + 1U < filtered.size(); ++i) {
+            if ((i & 63) == 0) checkWork();
             squared[i] = filtered[i] * filtered[i];
         }
     }
@@ -579,6 +559,7 @@ std::vector<double> computeBurstBandIntermediate(const std::vector<double>& samp
     std::vector<double> out(small.size(), 0.0);
     const double cutoff = std::pow(10.0, -0.1) - 1.0; // disabled-threshold branch used by Burst_compute
     for (std::size_t r = 0; r < out.size(); ++r) {
+        if ((r & 63) == 0) checkWork();
         const double denom = (r < large.size() && large[r] != 0.0) ? large[r] : 1.0;
         const double ratio = delta[r] / denom;
         double v = (!std::isfinite(ratio) || ratio < cutoff || (1.0 + ratio) <= 0.0)
@@ -599,6 +580,7 @@ std::vector<double> computeBurstPulseIntermediate(const std::array<std::vector<d
     }
     std::vector<double> out(rows, 0.0);
     for (std::size_t r = 0; r < rows; ++r) {
+        if ((r & 63) == 0) checkWork();
         double prodP = 1.0;
         double prodQ = 1.0;
         for (const auto& b : bands) {
@@ -633,524 +615,13 @@ std::vector<double> shiftRightWithZeros(const std::vector<double>& in, int shift
 
 } // namespace
 
-namespace {
-
-constexpr std::uint16_t kWaveFormatPcm = 0x0001;
-constexpr std::uint16_t kWaveFormatAdpcm = 0x0002;
-constexpr std::uint16_t kWaveFormatIeeeFloat = 0x0003;
-constexpr std::uint16_t kWaveFormatMp3 = 0x0055;
-constexpr std::uint16_t kWaveFormatImaAdpcm = 0x0011;
-constexpr std::uint16_t kWaveFormatExtensible = 0xfffe;
-
-int runProcessWithoutShell(const std::filesystem::path& executable,
-                           const std::vector<std::filesystem::path>& arguments) {
-#ifdef _WIN32
-    std::vector<std::wstring> storage;
-    storage.reserve(arguments.size() + 1);
-    storage.push_back(executable.native());
-    for (const auto& argument : arguments) storage.push_back(argument.native());
-
-    std::vector<const wchar_t*> argv;
-    argv.reserve(storage.size() + 1);
-    for (const auto& argument : storage) argv.push_back(argument.c_str());
-    argv.push_back(nullptr);
-
-    const intptr_t result = _wspawnvp(_P_WAIT, storage.front().c_str(), argv.data());
-    if (result == -1) {
-        throw std::system_error(errno, std::generic_category(),
-                                "Unable to launch external audio decoder");
-    }
-    return static_cast<int>(result);
-#else
-    std::vector<std::string> storage;
-    storage.reserve(arguments.size() + 1);
-    storage.push_back(executable.native());
-    for (const auto& argument : arguments) storage.push_back(argument.native());
-
-    std::vector<char*> argv;
-    argv.reserve(storage.size() + 1);
-    for (auto& argument : storage) argv.push_back(argument.data());
-    argv.push_back(nullptr);
-
-    pid_t child = 0;
-    const int spawnError = posix_spawnp(&child, storage.front().c_str(), nullptr, nullptr,
-                                        argv.data(), environ);
-    if (spawnError != 0) {
-        throw std::system_error(spawnError, std::generic_category(),
-                                "Unable to launch external audio decoder");
-    }
-
-    int status = 0;
-    while (waitpid(child, &status, 0) == -1) {
-        if (errno == EINTR) continue;
-        throw std::system_error(errno, std::generic_category(),
-                                "Unable to wait for external audio decoder");
-    }
-    if (WIFEXITED(status)) return WEXITSTATUS(status);
-    if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
-    return -1;
-#endif
-}
-
-std::filesystem::path makeTempAudioPath(const char* stem, const char* extension) {
-    static std::atomic<std::uint64_t> counter{0};
-    const auto now = std::chrono::high_resolution_clock::now().time_since_epoch().count();
-    const std::uint64_t n = ++counter;
-    std::uint64_t entropy = static_cast<std::uint64_t>(now) ^ (n * 0x9e3779b97f4a7c15ULL);
-    try {
-        entropy ^= (static_cast<std::uint64_t>(std::random_device{}()) << 32U);
-        entropy ^= static_cast<std::uint64_t>(std::random_device{}());
-    } catch (...) {
-        // Some standard libraries expose random_device but cannot open an entropy source.
-        // The timestamp+counter fallback is still sufficient to avoid routine collisions.
-    }
-    return std::filesystem::temp_directory_path() /
-           (std::string(stem) + "_" + std::to_string(entropy) + extension);
-}
-
-std::filesystem::path makeTempDecodedWavPath() {
-    return makeTempAudioPath("neolip_audio_decode", ".wav");
-}
-
-std::filesystem::path makeTempMp3Path() {
-    return makeTempAudioPath("neolip_audio_payload", ".mp3");
-}
-
-std::vector<unsigned char> readWholeFileBytes(const std::filesystem::path& path) {
-    std::ifstream in(path, std::ios::binary);
-    if (!in) throw std::runtime_error("cannot open audio file: " + path.string());
-    return std::vector<unsigned char>((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-}
-
-int mp3FrameLengthAt(const std::vector<unsigned char>& b, std::size_t i) {
-    if (i + 4 > b.size()) return 0;
-    const std::uint32_t x = (static_cast<std::uint32_t>(b[i]) << 24U) |
-                            (static_cast<std::uint32_t>(b[i+1]) << 16U) |
-                            (static_cast<std::uint32_t>(b[i+2]) << 8U) |
-                            static_cast<std::uint32_t>(b[i+3]);
-    if (((x >> 21U) & 0x7ffU) != 0x7ffU) return 0;
-    const unsigned ver = (x >> 19U) & 0x03U;
-    const unsigned layer = (x >> 17U) & 0x03U;
-    const unsigned brIndex = (x >> 12U) & 0x0fU;
-    const unsigned srIndex = (x >> 10U) & 0x03U;
-    const unsigned pad = (x >> 9U) & 0x01U;
-    if (ver == 1 || layer == 0 || brIndex == 0 || brIndex == 15 || srIndex == 3) return 0;
-    static const int brMpeg1L3[16] = {0,32,40,48,56,64,80,96,112,128,160,192,224,256,320,0};
-    static const int brMpeg1L2[16] = {0,32,48,56,64,80,96,112,128,160,192,224,256,320,384,0};
-    static const int brMpeg1L1[16] = {0,32,64,96,128,160,192,224,256,288,320,352,384,416,448,0};
-    static const int brMpeg2L3[16] = {0,8,16,24,32,40,48,56,64,80,96,112,128,144,160,0};
-    static const int brMpeg2L2[16] = {0,8,16,24,32,40,48,56,64,80,96,112,128,144,160,0};
-    static const int brMpeg2L1[16] = {0,32,48,56,64,80,96,112,128,144,160,176,192,224,256,0};
-    static const int srTable[4][4] = {{11025,12000,8000,0}, {0,0,0,0}, {22050,24000,16000,0}, {44100,48000,32000,0}};
-    const bool mpeg1 = (ver == 3);
-    int brKbps = 0;
-    if (mpeg1 && layer == 1) brKbps = brMpeg1L3[brIndex];
-    else if (mpeg1 && layer == 2) brKbps = brMpeg1L2[brIndex];
-    else if (mpeg1 && layer == 3) brKbps = brMpeg1L1[brIndex];
-    else if (!mpeg1 && layer == 1) brKbps = brMpeg2L3[brIndex];
-    else if (!mpeg1 && layer == 2) brKbps = brMpeg2L2[brIndex];
-    else if (!mpeg1 && layer == 3) brKbps = brMpeg2L1[brIndex];
-    const int sr = srTable[ver][srIndex];
-    if (brKbps <= 0 || sr <= 0) return 0;
-    const int bitrate = brKbps * 1000;
-    if (layer == 3) return static_cast<int>((12.0 * bitrate / sr + pad) * 4.0);       // Layer I
-    if (layer == 2) return static_cast<int>(144.0 * bitrate / sr + pad);              // Layer II
-    return static_cast<int>((mpeg1 ? 144.0 : 72.0) * bitrate / sr + pad);             // Layer III
-}
-
-std::size_t findValidatedMp3Sync(const std::vector<unsigned char>& b, std::size_t begin, std::size_t end) {
-    end = std::min(end, b.size());
-    for (std::size_t i = begin; i + 4 < end; ++i) {
-        if (b[i] != 0xff || (b[i+1] & 0xe0U) != 0xe0U) continue;
-        const int len = mp3FrameLengthAt(b, i);
-        if (len <= 0) continue;
-        const std::size_t next = i + static_cast<std::size_t>(len);
-        if (next + 4 <= b.size() && b[next] == 0xff && (b[next+1] & 0xe0U) == 0xe0U && mp3FrameLengthAt(b, next) > 0) return i;
-    }
-    return static_cast<std::size_t>(-1);
-}
-
-std::size_t findKotorAppendedMp3Offset(const std::filesystem::path& path) {
-    const std::vector<unsigned char> b = readWholeFileBytes(path);
-    if (b.size() < 64 || std::memcmp(b.data(), "RIFF", 4) != 0 || std::memcmp(b.data() + 8, "WAVE", 4) != 0) {
-        return static_cast<std::size_t>(-1);
-    }
-    std::size_t off = 12;
-    while (off + 8 <= b.size()) {
-        const std::string id(reinterpret_cast<const char*>(b.data() + off), 4);
-        const std::uint32_t sz = le32(b.data() + off + 4);
-        const std::size_t dataStart = off + 8;
-        if (id == "data" && sz == 0) {
-            return findValidatedMp3Sync(b, dataStart, std::min<std::size_t>(b.size(), dataStart + 4096));
-        }
-        const std::size_t next = dataStart + static_cast<std::size_t>(sz) + (sz & 1U);
-        if (next <= off || next > b.size()) break;
-        off = next;
-    }
-    return static_cast<std::size_t>(-1);
-}
-
-std::filesystem::path ffmpegCommandName() {
-#ifdef _WIN32
-    if (const wchar_t* value = _wgetenv(L"CSLU_AUDIO_DECODER")) {
-        if (*value) return std::filesystem::path(value);
-    }
-    if (const wchar_t* value = _wgetenv(L"CSLU_FFMPEG")) {
-        if (*value) return std::filesystem::path(value);
-    }
-#else
-    if (const char* v = std::getenv("CSLU_AUDIO_DECODER")) {
-        if (*v) return std::filesystem::path(v);
-    }
-    if (const char* v = std::getenv("CSLU_FFMPEG")) {
-        if (*v) return std::filesystem::path(v);
-    }
-#endif
-    return std::filesystem::path("ffmpeg");
-}
-
-std::uint16_t effectiveTagFromExtensible(const std::vector<unsigned char>& fmt) {
-    if (fmt.size() < 40) return kWaveFormatExtensible;
-    static constexpr unsigned char pcmGuid[16] = {0x01,0x00,0x00,0x00,0x00,0x00,0x10,0x00,0x80,0x00,0x00,0xaa,0x00,0x38,0x9b,0x71};
-    static constexpr unsigned char floatGuid[16] = {0x03,0x00,0x00,0x00,0x00,0x00,0x10,0x00,0x80,0x00,0x00,0xaa,0x00,0x38,0x9b,0x71};
-    static constexpr unsigned char imaGuid[16] = {0x11,0x00,0x00,0x00,0x00,0x00,0x10,0x00,0x80,0x00,0x00,0xaa,0x00,0x38,0x9b,0x71};
-    const unsigned char* g = fmt.data() + 24;
-    if (std::equal(g, g + 16, pcmGuid)) return kWaveFormatPcm;
-    if (std::equal(g, g + 16, floatGuid)) return kWaveFormatIeeeFloat;
-    if (std::equal(g, g + 16, imaGuid)) return kWaveFormatImaAdpcm;
-    return kWaveFormatExtensible;
-}
-
-bool bytesLookLikeMp3(const std::vector<unsigned char>& b) {
-    if (b.size() >= 3 && b[0] == 'I' && b[1] == 'D' && b[2] == '3') return true;
-    const std::size_t limit = std::min<std::size_t>(b.size(), 4096);
-    for (std::size_t i = 0; i + 1 < limit; ++i) {
-        if (b[i] == 0xff && (b[i + 1] & 0xe0U) == 0xe0U) {
-            const unsigned layer = (b[i + 1] >> 1U) & 0x03U;
-            if (layer != 0) return true;
-        }
-    }
-    return false;
-}
-
-std::vector<unsigned char> readSmallPrefix(const std::filesystem::path& path) {
-    std::ifstream in(path, std::ios::binary);
-    if (!in) throw std::runtime_error("cannot open audio file: " + path.string());
-    std::vector<unsigned char> b(4096, 0);
-    in.read(reinterpret_cast<char*>(b.data()), static_cast<std::streamsize>(b.size()));
-    b.resize(static_cast<std::size_t>(std::max<std::streamsize>(0, in.gcount())));
-    return b;
-}
-
-std::int32_t signExtend24(std::uint32_t u) {
-    if (u & 0x00800000U) u |= 0xff000000U;
-    return static_cast<std::int32_t>(u);
-}
-
-float readFloat32Le(const unsigned char* p) {
-    const std::uint32_t u = le32(p);
-    float f = 0.0f;
-    std::memcpy(&f, &u, sizeof(f));
-    return f;
-}
-
-double readFloat64Le(const unsigned char* p) {
-    std::uint64_t u = 0;
-    for (int i = 0; i < 8; ++i) u |= static_cast<std::uint64_t>(p[i]) << (8U * static_cast<unsigned>(i));
-    double d = 0.0;
-    std::memcpy(&d, &u, sizeof(d));
-    return d;
-}
-
-Pcm16Mono readNativePcmWave(const std::filesystem::path& path, bool allowExternalDecoder);
-
-
-constexpr int kImaIndexTable[16] = {
-    -1, -1, -1, -1, 2, 4, 6, 8,
-    -1, -1, -1, -1, 2, 4, 6, 8
-};
-
-constexpr int kImaStepTable[89] = {
-    7, 8, 9, 10, 11, 12, 13, 14, 16, 17,
-    19, 21, 23, 25, 28, 31, 34, 37, 41, 45,
-    50, 55, 60, 66, 73, 80, 88, 97, 107, 118,
-    130, 143, 157, 173, 190, 209, 230, 253, 279, 307,
-    337, 371, 408, 449, 494, 544, 598, 658, 724, 796,
-    876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066,
-    2272, 2499, 2749, 3024, 3327, 3660, 4026, 4428, 4871, 5358,
-    5894, 6484, 7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899,
-    15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767
-};
-
-void decodeImaNibble(unsigned nibble, int& predictor, int& index, std::vector<std::int16_t>& out) {
-    nibble &= 0x0fU;
-    const int step = kImaStepTable[std::max(0, std::min(88, index))];
-    int diff = step >> 3;
-    if (nibble & 1U) diff += step >> 2;
-    if (nibble & 2U) diff += step >> 1;
-    if (nibble & 4U) diff += step;
-    if (nibble & 8U) predictor -= diff;
-    else predictor += diff;
-    predictor = std::max(-32768, std::min(32767, predictor));
-    index += kImaIndexTable[nibble];
-    index = std::max(0, std::min(88, index));
-    out.push_back(static_cast<std::int16_t>(predictor));
-}
-
-Pcm16Mono decodeImaAdpcmWaveData(const std::vector<unsigned char>& data,
-                                 std::uint16_t channels,
-                                 std::uint32_t sampleRate,
-                                 std::uint16_t blockAlign,
-                                 std::uint16_t samplesPerBlock) {
-    if (channels == 0 || channels > 8) {
-        throw std::runtime_error("unsupported IMA ADPCM channel count");
-    }
-    if (sampleRate == 0 || blockAlign < static_cast<std::uint16_t>(channels * 4U)) {
-        throw std::runtime_error("invalid IMA ADPCM WAV block geometry");
-    }
-    if (samplesPerBlock == 0) {
-        samplesPerBlock = static_cast<std::uint16_t>(((blockAlign - channels * 4U) * 2U) / channels + 1U);
-    }
-
-    Pcm16Mono out;
-    out.sampleRate = sampleRate;
-    out.samples.reserve(data.size() * 2U / std::max<unsigned>(1, channels));
-
-    for (std::size_t blockBase = 0; blockBase + static_cast<std::size_t>(channels) * 4U <= data.size(); blockBase += blockAlign) {
-        const std::size_t blockEnd = std::min<std::size_t>(blockBase + blockAlign, data.size());
-        std::vector<int> predictor(channels, 0);
-        std::vector<int> index(channels, 0);
-        std::vector<std::vector<std::int16_t>> decoded(channels);
-        for (std::uint16_t ch = 0; ch < channels; ++ch) {
-            const std::size_t off = blockBase + static_cast<std::size_t>(ch) * 4U;
-            const std::uint16_t u = static_cast<std::uint16_t>(data[off] | (data[off + 1] << 8));
-            predictor[ch] = static_cast<std::int16_t>(u);
-            index[ch] = std::max(0, std::min(88, static_cast<int>(data[off + 2])));
-            decoded[ch].reserve(samplesPerBlock);
-            decoded[ch].push_back(static_cast<std::int16_t>(predictor[ch]));
-        }
-
-        std::size_t p = blockBase + static_cast<std::size_t>(channels) * 4U;
-        if (channels == 1) {
-            while (p < blockEnd && decoded[0].size() < samplesPerBlock) {
-                const unsigned b = data[p++];
-                decodeImaNibble(b & 0x0fU, predictor[0], index[0], decoded[0]);
-                if (decoded[0].size() < samplesPerBlock) {
-                    decodeImaNibble((b >> 4U) & 0x0fU, predictor[0], index[0], decoded[0]);
-                }
-            }
-        } else {
-            while (p < blockEnd) {
-                bool any = false;
-                for (std::uint16_t ch = 0; ch < channels; ++ch) {
-                    for (int groupByte = 0; groupByte < 4 && p < blockEnd && decoded[ch].size() < samplesPerBlock; ++groupByte) {
-                        const unsigned b = data[p++];
-                        decodeImaNibble(b & 0x0fU, predictor[ch], index[ch], decoded[ch]);
-                        if (decoded[ch].size() < samplesPerBlock) {
-                            decodeImaNibble((b >> 4U) & 0x0fU, predictor[ch], index[ch], decoded[ch]);
-                        }
-                        any = true;
-                    }
-                }
-                if (!any) break;
-            }
-        }
-
-        std::size_t frames = decoded[0].size();
-        for (std::uint16_t ch = 1; ch < channels; ++ch) frames = std::min(frames, decoded[ch].size());
-        for (std::size_t i = 0; i < frames; ++i) {
-            long long acc = 0;
-            for (std::uint16_t ch = 0; ch < channels; ++ch) acc += decoded[ch][i];
-            out.samples.push_back(static_cast<double>(acc) / static_cast<double>(channels));
-        }
-    }
-    return out;
-}
-
-Pcm16Mono decodeCompressedAudioWithFfmpeg(const std::filesystem::path& path) {
-    const std::filesystem::path tmp = makeTempDecodedWavPath();
-    const std::filesystem::path decoder = ffmpegCommandName();
-    const std::vector<std::filesystem::path> arguments = {
-        "-hide_banner", "-loglevel", "error", "-y", "-i", path,
-        "-map", "0:a:0", "-ac", "1", "-c:a", "pcm_s16le", tmp};
-    const int rc = runProcessWithoutShell(decoder, arguments);
-    if (rc != 0 || !std::filesystem::exists(tmp)) {
-        std::error_code ignored;
-        std::filesystem::remove(tmp, ignored);
-        throw std::runtime_error(
-            "compressed/KOTOR audio requires an external decoder. Install ffmpeg or set "
-            "CSLU_FFMPEG/CSLU_AUDIO_DECODER to an executable path. Decoder exited with code " +
-            std::to_string(rc) + ".");
-    }
-    try {
-        Pcm16Mono out = readNativePcmWave(tmp, false);
-        std::error_code ec;
-        std::filesystem::remove(tmp, ec);
-        return out;
-    } catch (...) {
-        std::error_code ec;
-        std::filesystem::remove(tmp, ec);
-        throw;
-    }
-}
-
-Pcm16Mono decodeKotorAppendedMp3WithFfmpeg(const std::filesystem::path& path, std::size_t offset) {
-    const std::filesystem::path mp3tmp = makeTempMp3Path();
-    {
-        const std::vector<unsigned char> b = readWholeFileBytes(path);
-        if (offset >= b.size()) throw std::runtime_error("invalid KOTOR MP3 payload offset in " + path.string());
-        std::ofstream out(mp3tmp, std::ios::binary);
-        if (!out) throw std::runtime_error("cannot create temporary MP3 payload file");
-        out.write(reinterpret_cast<const char*>(b.data() + offset), static_cast<std::streamsize>(b.size() - offset));
-    }
-    try {
-        Pcm16Mono out = decodeCompressedAudioWithFfmpeg(mp3tmp);
-        std::error_code ec;
-        std::filesystem::remove(mp3tmp, ec);
-        return out;
-    } catch (...) {
-        std::error_code ec;
-        std::filesystem::remove(mp3tmp, ec);
-        throw;
-    }
-}
-
-Pcm16Mono readNativePcmWave(const std::filesystem::path& path, bool allowExternalDecoder) {
-    std::ifstream in(path, std::ios::binary);
-    if (!in) {
-        throw std::runtime_error("cannot open audio file: " + path.string());
-    }
-
-    unsigned char riff[12];
-    readExact(in, reinterpret_cast<char*>(riff), 12, "RIFF header");
-    if (std::memcmp(riff, "RIFF", 4) != 0 || std::memcmp(riff + 8, "WAVE", 4) != 0) {
-        throw std::runtime_error("not a RIFF/WAVE file: " + path.string());
-    }
-
-    std::uint16_t formatTag = 0;
-    std::uint16_t effectiveFormatTag = 0;
-    std::uint16_t channels = 0;
-    std::uint32_t sampleRate = 0;
-    std::uint16_t blockAlign = 0;
-    std::uint16_t bitsPerSample = 0;
-    std::uint16_t samplesPerBlock = 0;
-    std::vector<unsigned char> data;
-    bool haveFmt = false;
-    bool haveData = false;
-
-    while (in) {
-        unsigned char chunkHeader[8];
-        in.read(reinterpret_cast<char*>(chunkHeader), 8);
-        if (in.gcount() == 0) break;
-        if (in.gcount() != 8) throw std::runtime_error("truncated WAV chunk header");
-        const std::uint32_t chunkSize = le32(chunkHeader + 4);
-        const std::string id(reinterpret_cast<char*>(chunkHeader), 4);
-        if (id == "fmt ") {
-            std::vector<unsigned char> fmt(chunkSize);
-            if (chunkSize > 0) readExact(in, reinterpret_cast<char*>(fmt.data()), chunkSize, "fmt chunk");
-            if (chunkSize < 16) throw std::runtime_error("WAV fmt chunk too short");
-            formatTag = le16(fmt.data() + 0);
-            channels = le16(fmt.data() + 2);
-            sampleRate = le32(fmt.data() + 4);
-            blockAlign = le16(fmt.data() + 12);
-            bitsPerSample = le16(fmt.data() + 14);
-            if ((formatTag == kWaveFormatImaAdpcm || formatTag == kWaveFormatAdpcm) && fmt.size() >= 20) {
-                samplesPerBlock = le16(fmt.data() + 18);
-            }
-            effectiveFormatTag = (formatTag == kWaveFormatExtensible) ? effectiveTagFromExtensible(fmt) : formatTag;
-            haveFmt = true;
-        } else if (id == "data") {
-            std::vector<unsigned char> chunk(chunkSize);
-            if (chunkSize > 0) readExact(in, reinterpret_cast<char*>(chunk.data()), chunkSize, "data chunk");
-            data.insert(data.end(), chunk.begin(), chunk.end());
-            haveData = true;
-        } else {
-            in.seekg(chunkSize, std::ios::cur);
-            if (!in) throw std::runtime_error("failed skipping WAV chunk " + id);
-        }
-        if (chunkSize & 1U) in.seekg(1, std::ios::cur);
-    }
-
-    if (!haveFmt || !haveData) throw std::runtime_error("WAV missing fmt or data chunk: " + path.string());
-
-    if (effectiveFormatTag == kWaveFormatImaAdpcm) {
-        return decodeImaAdpcmWaveData(data, channels, sampleRate, blockAlign, samplesPerBlock);
-    }
-
-    const bool compressed = (effectiveFormatTag == kWaveFormatMp3 ||
-                             effectiveFormatTag == kWaveFormatAdpcm ||
-                             (effectiveFormatTag != kWaveFormatPcm && effectiveFormatTag != kWaveFormatIeeeFloat));
-    if (compressed) {
-        if (allowExternalDecoder) return decodeCompressedAudioWithFfmpeg(path);
-        throw std::runtime_error("decoded temporary WAV is still compressed or unsupported: " + path.string());
-    }
-
-    if (channels == 0 || sampleRate == 0 || blockAlign == 0) {
-        throw std::runtime_error("invalid WAV fmt fields: " + path.string());
-    }
-    const std::uint16_t bytesPerSample = static_cast<std::uint16_t>((bitsPerSample + 7U) / 8U);
-    if (bytesPerSample == 0 || blockAlign < channels * bytesPerSample) {
-        throw std::runtime_error("unsupported WAV block alignment: " + path.string());
-    }
-
-    if (effectiveFormatTag == kWaveFormatPcm && !(bitsPerSample == 8 || bitsPerSample == 16 || bitsPerSample == 24 || bitsPerSample == 32)) {
-        throw std::runtime_error("unsupported PCM bit depth " + std::to_string(bitsPerSample) + " in " + path.string());
-    }
-    if (effectiveFormatTag == kWaveFormatIeeeFloat && !(bitsPerSample == 32 || bitsPerSample == 64)) {
-        throw std::runtime_error("unsupported float WAV bit depth " + std::to_string(bitsPerSample) + " in " + path.string());
-    }
-
-    const std::size_t frames = data.size() / blockAlign;
-    Pcm16Mono out;
-    out.sampleRate = sampleRate;
-    out.samples.assign(frames, 0.0);
-    for (std::size_t frame = 0; frame < frames; ++frame) {
-        const std::size_t base = frame * blockAlign;
-        long double acc = 0.0L;
-        for (std::uint16_t ch = 0; ch < channels; ++ch) {
-            const std::size_t off = base + static_cast<std::size_t>(ch) * bytesPerSample;
-            double sample = 0.0;
-            if (effectiveFormatTag == kWaveFormatPcm) {
-                if (bitsPerSample == 8) {
-                    sample = static_cast<double>(static_cast<int>(data[off]) - 128) * 256.0;
-                } else if (bitsPerSample == 16) {
-                    const std::uint16_t u = static_cast<std::uint16_t>(data[off] | (data[off + 1] << 8));
-                    sample = static_cast<double>(static_cast<std::int16_t>(u));
-                } else if (bitsPerSample == 24) {
-                    const std::uint32_t u = static_cast<std::uint32_t>(data[off] | (data[off + 1] << 8) | (data[off + 2] << 16));
-                    sample = static_cast<double>(signExtend24(u)) / 256.0;
-                } else if (bitsPerSample == 32) {
-                    const std::uint32_t u = le32(data.data() + off);
-                    sample = static_cast<double>(static_cast<std::int32_t>(u)) / 65536.0;
-                }
-            } else if (effectiveFormatTag == kWaveFormatIeeeFloat) {
-                if (bitsPerSample == 32) sample = static_cast<double>(readFloat32Le(data.data() + off)) * 32768.0;
-                else sample = readFloat64Le(data.data() + off) * 32768.0;
-            }
-            if (sample < -32768.0) sample = -32768.0;
-            if (sample > 32767.0) sample = 32767.0;
-            acc += sample;
-        }
-        out.samples[frame] = static_cast<double>(acc / static_cast<long double>(channels));
-    }
-    return out;
-}
-
-} // namespace
-
 Pcm16Mono readPcm16Mono(const std::filesystem::path& path) {
-    const std::vector<unsigned char> prefix = readSmallPrefix(path);
-    if (prefix.size() >= 12 && std::memcmp(prefix.data(), "RIFF", 4) == 0 && std::memcmp(prefix.data() + 8, "WAVE", 4) == 0) {
-        const std::size_t mp3Off = findKotorAppendedMp3Offset(path);
-        if (mp3Off != static_cast<std::size_t>(-1)) {
-            return decodeKotorAppendedMp3WithFfmpeg(path, mp3Off);
-        }
-        return readNativePcmWave(path, true);
-    }
-    if (bytesLookLikeMp3(prefix)) {
-        return decodeCompressedAudioWithFfmpeg(path);
-    }
-    throw std::runtime_error("unsupported audio input. Expected RIFF/WAVE PCM/float, RIFF/WAVE MP3, or raw MP3-with-.wav KOTOR stream: " + path.string());
+    const auto audio = neolip::decodeAudio(path);
+    if (audio->channelChoiceRequired) throw std::runtime_error(audio->warnings.front().message);
+    Pcm16Mono result; result.sampleRate = audio->waveform.sampleRate;
+    result.samples.reserve(audio->waveform.mono.size());
+    for (const float sample : audio->waveform.mono) result.samples.push_back(static_cast<double>(sample) * 32768.0);
+    return result;
 }
 Matrix computeLogEnergy(const std::vector<double>& samples,
                         int sampleRate,
@@ -1171,6 +642,7 @@ Matrix computeLogEnergy(const std::vector<double>& samples,
 
     std::vector<double> squared(samples.size());
     for (std::size_t i = 0; i < samples.size(); ++i) {
+        if ((i & 63) == 0) checkWork();
         squared[i] = samples[i] * samples[i];
     }
 
@@ -1183,6 +655,7 @@ Matrix computeLogEnergy(const std::vector<double>& samples,
     out.cols = 1;
     out.data.assign(outputRows, 0.0);
     for (std::size_t frame = 0; frame < outputRows; ++frame) {
+        if ((frame & 63) == 0) checkWork();
         const long center = static_cast<long>(frame) * static_cast<long>(stepSamples);
         const long start = center - half;
         double weighted = 0.0;
@@ -1240,6 +713,7 @@ Matrix computeIntensityDiscrimination16k(const std::vector<double>& samples,
 
     const IntensityBandResult full = computeIntensityBand(samples);
     for (std::size_t r = 0; r < out.rows; ++r) {
+        if ((r & 63) == 0) checkWork();
         // The original Intensity_discrimination wrapper copies the full-band pair
         // from one double before the returned work buffer. In practice this yields
         // a one-frame right shift with a zero first row; preserve it for CSLU
@@ -1255,6 +729,7 @@ Matrix computeIntensityDiscrimination16k(const std::vector<double>& samples,
         const IntensityBandResult b = computeIntensityBand(filtered);
         const std::size_t col = 2 + band * 2;
         for (std::size_t r = 0; r < out.rows; ++r) {
+            if ((r & 63) == 0) checkWork();
             if (r < b.value.size()) {
                 out(r, col) = b.value[r];
                 out(r, col + 1) = b.delta[r];
@@ -1288,6 +763,7 @@ Matrix computeBurstMx8k(const std::vector<double>& samples, std::size_t outputRo
     out.cols = 8;
     out.data.assign(out.rows * out.cols, 0.0);
     for (std::size_t r = 0; r < outputRows; ++r) {
+        if ((r & 63) == 0) checkWork();
         const std::size_t start = r * static_cast<std::size_t>(kBurstGroupSamples);
         const std::size_t end = start + static_cast<std::size_t>(kBurstGroupSamples);
         for (std::size_t c = 0; c < 8; ++c) {
@@ -1315,6 +791,7 @@ Matrix computeBurstPulsesCol7(const Matrix& burstMx) {
     out.cols = 1;
     out.data.assign(out.rows, 0.0);
     for (std::size_t r = 0; r < out.rows; ++r) {
+        if ((r & 63) == 0) checkWork();
         out(r, 0) = burstMx(r, 7);
     }
     return out;
@@ -1382,6 +859,7 @@ std::size_t nextPow2(std::size_t n) {
 void fftRadix2(std::vector<std::complex<double>>& a) {
     const std::size_t n = a.size();
     for (std::size_t i = 1, j = 0; i < n; ++i) {
+        if ((i & 63) == 0) checkWork();
         std::size_t bit = n >> 1U;
         for (; j & bit; bit >>= 1U) j ^= bit;
         j ^= bit;
@@ -1392,6 +870,7 @@ void fftRadix2(std::vector<std::complex<double>>& a) {
         const double ang = -2.0 * pi / static_cast<double>(len);
         const std::complex<double> wlen(std::cos(ang), std::sin(ang));
         for (std::size_t i = 0; i < n; i += len) {
+            if ((i & 63) == 0) checkWork();
             std::complex<double> w(1.0, 0.0);
             for (std::size_t j = 0; j < len / 2; ++j) {
                 const std::complex<double> u = a[i + j];
@@ -1420,6 +899,7 @@ Matrix padFeatureLikeTclForPlp(const Matrix& initFeat, std::size_t padFrames, st
     out.cols = initFeat.cols;
     out.data.assign(out.rows * out.cols, 0.0);
     for (std::size_t r = 0; r < rows; ++r) {
+        if ((r & 63) == 0) checkWork();
         std::size_t src = 0;
         if (r < padFrames) {
             src = 0;
@@ -1442,6 +922,7 @@ Matrix resizeEnergyLikeTcl(const Matrix& energyNorm, std::size_t rows) {
     out.cols = 1;
     out.data.assign(rows, 0.0);
     for (std::size_t r = 0; r < rows; ++r) {
+        if ((r & 63) == 0) checkWork();
         if (r < energyNorm.rows) {
             out(r, 0) = energyNorm(r, 0);
         } else if (energyNorm.rows > 0) {
@@ -1466,6 +947,7 @@ Pcm16Mono applyPrepDcrmIir(const Pcm16Mono& wav, double tauMs) {
     out.sampleRate = wav.sampleRate;
     out.samples.resize(wav.samples.size());
     for (std::size_t i = 0; i < wav.samples.size(); ++i) {
+        if ((i & 63) == 0) checkWork();
         const double x = wav.samples[i];
         double y = x - static_cast<double>(mean);
         if (y < -32768.0) y = -32768.0;
@@ -1528,6 +1010,7 @@ Matrix computeCsluDeltaOrder2(const Matrix& m) {
         return m(static_cast<std::size_t>(r), c);
     };
     for (std::size_t r = 0; r < m.rows; ++r) {
+        if ((r & 63) == 0) checkWork();
         for (std::size_t c = 0; c < m.cols; ++c) {
             const long rr = static_cast<long>(r);
             d(r, c) = (sample(rr + 1, c) - sample(rr - 1, c) +
@@ -1568,6 +1051,7 @@ Matrix computeApproxFeatureInit16k(const std::vector<double>& samples,
 
     std::vector<double> hamming(static_cast<std::size_t>(win));
     for (int i = 0; i < win; ++i) {
+        if ((i & 63) == 0) checkWork();
         hamming[static_cast<std::size_t>(i)] = 0.54 - 0.46 * std::cos(2.0 * pi * static_cast<double>(i) / static_cast<double>(win - 1));
     }
 
@@ -1577,6 +1061,7 @@ Matrix computeApproxFeatureInit16k(const std::vector<double>& samples,
     std::vector<double> centersBark(static_cast<std::size_t>(filters));
     std::vector<double> centersHz(static_cast<std::size_t>(filters));
     for (int i = 0; i < filters; ++i) {
+        if ((i & 63) == 0) checkWork();
         centersBark[static_cast<std::size_t>(i)] = static_cast<double>(i) * barkStep;
         centersHz[static_cast<std::size_t>(i)] = barkToHz(centersBark[static_cast<std::size_t>(i)]);
     }
@@ -1664,20 +1149,24 @@ Matrix computeApproxFeatureInit16k(const std::vector<double>& samples,
 
     double previousFrameLastSample = 0.0; // feature.dll's feature_t::x_1 state
     for (std::size_t r = 0; r < rows; ++r) {
+        if ((r & 63) == 0) checkWork();
         std::fill(buf.begin(), buf.end(), std::complex<double>(0.0, 0.0));
         const std::size_t base = r * static_cast<std::size_t>(hop);
         std::vector<double> frame(static_cast<std::size_t>(win));
         for (int i = 0; i < win; ++i) {
+            if ((i & 63) == 0) checkWork();
             frame[static_cast<std::size_t>(i)] = samples[base + static_cast<std::size_t>(i)];
         }
         const double lastOriginalSample = frame.back();
         for (int i = win - 1; i >= 1; --i) {
+            if ((i & 63) == 0) checkWork();
             frame[static_cast<std::size_t>(i)] -= preemphasis * frame[static_cast<std::size_t>(i - 1)];
         }
         frame[0] -= preemphasis * previousFrameLastSample;
         previousFrameLastSample = lastOriginalSample;
 
         for (int i = 0; i < win; ++i) {
+            if ((i & 63) == 0) checkWork();
             buf[static_cast<std::size_t>(i)] = frame[static_cast<std::size_t>(i)] * hamming[static_cast<std::size_t>(i)];
         }
         fftRadix2(buf);
@@ -1727,6 +1216,7 @@ PlpApproxFeatures postprocessPlpFromInitAndEnergy(const Matrix& initFeat,
     std::size_t minIdx = 0;
     double minEnergy = std::numeric_limits<double>::infinity();
     for (std::size_t r = 0; r < energyBigwin.rows; ++r) {
+        if ((r & 63) == 0) checkWork();
         const double v = energyBigwin(r, 0);
         if (v < minEnergy) { minEnergy = v; minIdx = r; }
     }
@@ -1747,6 +1237,7 @@ PlpApproxFeatures postprocessPlpFromInitAndEnergy(const Matrix& initFeat,
     std::vector<double> avg(out.featMfccPadded.cols, 0.0);
     const double count = static_cast<double>(eframe - bframe + 1);
     for (int r = bframe; r <= eframe; ++r) {
+        if ((r & 63) == 0) checkWork();
         for (std::size_t c = 0; c < out.featMfccPadded.cols; ++c) {
             avg[c] += out.featMfccPadded(static_cast<std::size_t>(r), c);
         }
@@ -1760,6 +1251,7 @@ PlpApproxFeatures postprocessPlpFromInitAndEnergy(const Matrix& initFeat,
     out.featNoDelta.cols = out.featMfccPadded.cols;
     out.featNoDelta.data.assign(out.featNoDelta.rows * out.featNoDelta.cols, 0.0);
     for (std::size_t r = 0; r < out.featMfccPadded.rows; ++r) {
+        if ((r & 63) == 0) checkWork();
         for (std::size_t c = 0; c < out.featMfccPadded.cols; ++c) {
             out.featCms(r, c) = out.featMfccPadded(r, c) - avg[c];
         }
@@ -1773,6 +1265,7 @@ PlpApproxFeatures postprocessPlpFromInitAndEnergy(const Matrix& initFeat,
     out.featWithDelta.cols = out.featNoDelta.cols + out.featDelta.cols;
     out.featWithDelta.data.assign(out.featWithDelta.rows * out.featWithDelta.cols, 0.0);
     for (std::size_t r = 0; r < out.featWithDelta.rows; ++r) {
+        if ((r & 63) == 0) checkWork();
         for (std::size_t c = 0; c < out.featNoDelta.cols; ++c) {
             out.featWithDelta(r, c) = out.featNoDelta(r, c);
         }
@@ -1798,6 +1291,7 @@ PlpApproxFeatures computePlpApprox16k(const Pcm16Mono& wav16k, std::size_t outpu
     std::size_t minIdx = 0;
     double minEnergy = std::numeric_limits<double>::infinity();
     for (std::size_t r = 0; r < energy.specEnergyBigwin100.rows; ++r) {
+        if ((r & 63) == 0) checkWork();
         const double v = energy.specEnergyBigwin100(r, 0);
         if (v < minEnergy) { minEnergy = v; minIdx = r; }
     }
@@ -1818,6 +1312,7 @@ PlpApproxFeatures computePlpApprox16k(const Pcm16Mono& wav16k, std::size_t outpu
     std::vector<double> avg(out.featMfccPadded.cols, 0.0);
     const double count = static_cast<double>(eframe - bframe + 1);
     for (int r = bframe; r <= eframe; ++r) {
+        if ((r & 63) == 0) checkWork();
         for (std::size_t c = 0; c < out.featMfccPadded.cols; ++c) {
             avg[c] += out.featMfccPadded(static_cast<std::size_t>(r), c);
         }
@@ -1831,6 +1326,7 @@ PlpApproxFeatures computePlpApprox16k(const Pcm16Mono& wav16k, std::size_t outpu
     out.featNoDelta.cols = out.featMfccPadded.cols;
     out.featNoDelta.data.assign(out.featNoDelta.rows * out.featNoDelta.cols, 0.0);
     for (std::size_t r = 0; r < out.featMfccPadded.rows; ++r) {
+        if ((r & 63) == 0) checkWork();
         for (std::size_t c = 0; c < out.featMfccPadded.cols; ++c) {
             out.featCms(r, c) = out.featMfccPadded(r, c) - avg[c];
         }
@@ -1844,6 +1340,7 @@ PlpApproxFeatures computePlpApprox16k(const Pcm16Mono& wav16k, std::size_t outpu
     out.featWithDelta.cols = out.featNoDelta.cols + out.featDelta.cols;
     out.featWithDelta.data.assign(out.featWithDelta.rows * out.featWithDelta.cols, 0.0);
     for (std::size_t r = 0; r < out.featWithDelta.rows; ++r) {
+        if ((r & 63) == 0) checkWork();
         for (std::size_t c = 0; c < out.featNoDelta.cols; ++c) {
             out.featWithDelta(r, c) = out.featNoDelta(r, c);
         }
@@ -1904,6 +1401,7 @@ int waveDllResampleBlock(const std::vector<float>& input,
         const float* h = coeff.data() + static_cast<std::size_t>(state.phase) * static_cast<std::size_t>(coeffCount);
         long double sum = 0.0L;
         for (int i = 0; i < coeffCount; ++i) {
+            if ((i & 63) == 0) checkWork();
             sum += static_cast<long double>(x[i]) * static_cast<long double>(h[i]);
         }
         output[static_cast<std::size_t>(state.outputIndex)] = static_cast<float>(sum);
@@ -2001,6 +1499,7 @@ Pcm16Mono sampleConvertWaveDllCompatible(const Pcm16Mono& wav, std::uint32_t tar
         const int remaining = static_cast<int>(std::min<std::size_t>(wav.samples.size() - inputIndex,
                                                                      static_cast<std::size_t>(maxCopy)));
         for (int i = 0; i < remaining; ++i) {
+            if ((i & 63) == 0) checkWork();
             inputBuffer[static_cast<std::size_t>(overlap + i)] = static_cast<float>(wav.samples[inputIndex + static_cast<std::size_t>(i)]);
         }
         inputIndex += static_cast<std::size_t>(remaining);
@@ -2053,6 +1552,7 @@ Pcm16Mono sampleConvertWaveDllCompatible(const Pcm16Mono& wav, std::uint32_t tar
     out.sampleRate = targetRate;
     out.samples.assign(finalLen, 0.0);
     for (std::size_t i = 0; i < finalLen; ++i) {
+        if ((i & 63) == 0) checkWork();
         const std::size_t src = static_cast<std::size_t>(shift) + i;
         const std::int16_t v = (src < rawOutput.size()) ? rawOutput[src] : 0;
         out.samples[i] = static_cast<double>(v);

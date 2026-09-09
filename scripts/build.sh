@@ -8,7 +8,7 @@ BUILD_DIR="$ROOT_DIR/build"
 BUILD_TYPE="Release"
 BUILD_WX="ON"
 REQUIRE_WX="ON"
-BUILD_CLI="ON"
+BUILD_CLI="OFF"
 MINIMAL_RELEASE="ON"
 JOBS="${JOBS:-}"
 TARGET=""
@@ -29,7 +29,7 @@ Options:
   --build-type TYPE        Debug, Release, RelWithDebInfo, or MinSizeRel
   --wx ON|OFF              Build the wxWidgets GUI target when available
   --require-wx ON|OFF      Fail configure if wxWidgets is unavailable
-  --cli ON|OFF             Compatibility option; NeoLIP has no public CLI
+  --cli ON|OFF             Build optional automation CLI (not packaged) [OFF]
   --minimal-release ON|OFF Enable release minimization flags
   --jobs N                 Parallel build jobs
   --target NAME            Build a specific CMake target
@@ -96,11 +96,9 @@ fi
 CONFIG_ARGS+=(
   "-DNEOLIP_BUILD_WX_GUI=$BUILD_WX"
   "-DNEOLIP_REQUIRE_WX_GUI=$REQUIRE_WX"
+  "-DNEOLIP_BUILD_CLI=$BUILD_CLI"
 )
 
-if [[ "$BUILD_CLI" != "ON" ]]; then
-  printf '%s\n' "Note: NeoLIP has no public CLI; --cli is retained only for compatibility."
-fi
 
 if [[ -n "$NEOSHARED_ROOT_VALUE" ]]; then
   [[ -f "$NEOSHARED_ROOT_VALUE/CMakeLists.txt" ]] || {
@@ -168,32 +166,5 @@ if [[ "$BUILD_WX" == "ON" && ( -z "$TARGET" || "$TARGET" == "NeoLIP" ) ]]; then
     exit 1
   fi
 
-  BACKEND_PATH="$(
-    first_existing_file \
-      "$BUILD_DIR/neolip_backend" \
-      "$BUILD_DIR/neolip_backend.exe" \
-      "$BUILD_DIR/$BUILD_TYPE/neolip_backend" \
-      "$BUILD_DIR/$BUILD_TYPE/neolip_backend.exe" \
-      "$BUILD_DIR/NeoLIP.app/Contents/MacOS/neolip_backend" \
-      "$BUILD_DIR/$BUILD_TYPE/NeoLIP.app/Contents/MacOS/neolip_backend" \
-      || true
-  )"
-  if [[ -z "$BACKEND_PATH" ]]; then
-    while IFS= read -r candidate; do
-      BACKEND_PATH="$candidate"
-      break
-    done < <(
-      find "$BUILD_DIR" -type f \
-        \( -name neolip_backend -o -name neolip_backend.exe \) \
-        -print 2>/dev/null
-    )
-  fi
-
-  if [[ -z "$BACKEND_PATH" ]]; then
-    echo "NeoLIP was built without its required backend helper under: $BUILD_DIR" >&2
-    exit 1
-  fi
-
   printf 'Built NeoLIP executable: %s\n' "$GUI_PATH"
-  printf 'Built NeoLIP backend:    %s\n' "$BACKEND_PATH"
 fi

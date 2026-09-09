@@ -1,4 +1,6 @@
+#include "work_control.hpp"
 #include "wav.hpp"
+#include "audio.hpp"
 
 #include <algorithm>
 #include <array>
@@ -71,6 +73,7 @@ bool looksLikeMp3Bytes(const std::vector<unsigned char>& b) {
     if (b.size() >= 3 && b[0] == 'I' && b[1] == 'D' && b[2] == '3') return true;
     const std::size_t limit = std::min<std::size_t>(b.size(), 4096);
     for (std::size_t i = 0; i + 1 < limit; ++i) {
+        if ((i & 63) == 0) checkWork();
         if (b[i] == 0xff && (b[i + 1] & 0xe0U) == 0xe0U) {
             const unsigned layer = (b[i + 1] >> 1U) & 0x03U;
             if (layer != 0) return true;
@@ -150,6 +153,7 @@ int mp3FrameLengthAtInfo(const std::vector<unsigned char>& b, std::size_t i, std
 std::size_t findValidatedMp3SyncInfo(const std::vector<unsigned char>& b, std::size_t begin, std::size_t end) {
     end = std::min(end, b.size());
     for (std::size_t i = begin; i + 4 < end; ++i) {
+        if ((i & 63) == 0) checkWork();
         if (b[i] != 0xff || (b[i+1] & 0xe0U) != 0xe0U) continue;
         const int len = mp3FrameLengthAtInfo(b, i);
         if (len <= 0) continue;
@@ -212,7 +216,7 @@ void classify(WavInfo& info) {
     if (info.effectiveFormatTag == 0 || info.formatTag != WAVE_FORMAT_EXTENSIBLE) info.effectiveFormatTag = info.formatTag;
     if (info.containerKind == AudioContainerKind::RawMp3 || info.isRawMp3) {
         info.encodingKind = AudioEncodingKind::Mp3;
-        info.requiresExternalDecoder = true;
+        info.requiresExternalDecoder = false; // No subprocess decoders in this product.
         info.canDecodeNatively = false;
         info.isKotorStreamCandidate = true;
         info.description = "raw MP3 payload using a .wav-style filename";
@@ -248,39 +252,41 @@ void classify(WavInfo& info) {
             } else if (info.effectiveFormatTag == WAVE_FORMAT_DVI_ADPCM) {
                 info.encodingKind = AudioEncodingKind::ImaAdpcm;
                 info.canDecodeNatively = (info.channels > 0 && info.blockAlign >= info.channels * 4 && info.sampleRate > 0);
-                info.requiresExternalDecoder = !info.canDecodeNatively;
+                info.requiresExternalDecoder = false;
                 info.description = "WAVE_FORMAT_EXTENSIBLE IMA/DVI ADPCM";
             } else {
                 info.encodingKind = AudioEncodingKind::UnsupportedCompressed;
-                info.requiresExternalDecoder = true;
+                info.requiresExternalDecoder = false; // No subprocess decoders in this product.
                 info.description = "unsupported WAVE_FORMAT_EXTENSIBLE subformat";
             }
             break;
         case WAVE_FORMAT_MPEGLAYER3:
             info.encodingKind = AudioEncodingKind::Mp3;
-            info.requiresExternalDecoder = true;
+            info.canDecodeNatively = true;
+            info.requiresExternalDecoder = false; // No subprocess decoders in this product.
             info.isKotorStreamCandidate = true;
             info.description = "RIFF/WAVE MP3 payload; common in KOTOR stream audio";
             break;
         case WAVE_FORMAT_ADPCM:
             info.encodingKind = AudioEncodingKind::MsAdpcm;
-            info.requiresExternalDecoder = true;
+            info.canDecodeNatively = info.channels > 0 && info.sampleRate > 0;
+            info.requiresExternalDecoder = false; // No subprocess decoders in this product.
             info.description = "RIFF/WAVE Microsoft ADPCM";
             break;
         case WAVE_FORMAT_DVI_ADPCM:
             info.encodingKind = AudioEncodingKind::ImaAdpcm;
             info.canDecodeNatively = (info.channels > 0 && info.blockAlign >= info.channels * 4 && info.sampleRate > 0);
-            info.requiresExternalDecoder = !info.canDecodeNatively;
+            info.requiresExternalDecoder = false;
             info.description = "RIFF/WAVE IMA/DVI ADPCM";
             break;
         default:
             info.encodingKind = AudioEncodingKind::UnsupportedCompressed;
-            info.requiresExternalDecoder = true;
+            info.requiresExternalDecoder = false; // No subprocess decoders in this product.
             info.description = "unsupported RIFF/WAVE format tag " + formatTagHex(info.formatTag);
             break;
     }
     if (!info.canDecodeNatively && !info.requiresExternalDecoder && info.isRiffWave) {
-        info.warning = "PCM layout is structurally unusual and may be rejected by the decoder";
+        info.warning = "This audio layout is unsupported or structurally invalid";
     }
 }
 
@@ -431,8 +437,8 @@ WavInfo readWavInfo(const std::filesystem::path& path) {
     if (mp3Payload.found) {
         info.effectiveFormatTag = WAVE_FORMAT_MPEGLAYER3;
         info.encodingKind = AudioEncodingKind::Mp3;
-        info.canDecodeNatively = false;
-        info.requiresExternalDecoder = true;
+        info.canDecodeNatively = true; // Built-in MP3 decoder.
+        info.requiresExternalDecoder = false; // No subprocess decoders in this product.
         info.isKotorStreamCandidate = true;
         info.description = "KOTOR RIFF/WAVE wrapper with appended MP3 stream";
         info.warning = "RIFF header advertises PCM with a zero-length data chunk; audio payload begins at MP3 sync byte " + std::to_string(mp3Payload.offset);
@@ -461,107 +467,9 @@ WavInfo readWavInfo(const std::filesystem::path& path) {
 }
 
 DecodedWaveform readMonoWaveform(const std::filesystem::path& path) {
-    const std::vector<unsigned char> bytes = readWholeFileBytesForInfo(path);
-    if (bytes.size() < 12 || std::memcmp(bytes.data(), "RIFF", 4) != 0 ||
-        std::memcmp(bytes.data() + 8, "WAVE", 4) != 0) {
-        throw std::runtime_error("not a RIFF/WAVE file: " + path.string());
-    }
-
-    std::uint16_t formatTag = 0;
-    std::uint16_t channels = 0;
-    std::uint32_t sampleRate = 0;
-    std::uint16_t blockAlign = 0;
-    std::uint16_t bitsPerSample = 0;
-    const unsigned char* sampleData = nullptr;
-    std::size_t sampleBytes = 0;
-
-    for (std::size_t offset = 12; offset + 8 <= bytes.size();) {
-        const std::uint32_t chunkSize = le32(bytes.data() + offset + 4);
-        const std::size_t body = offset + 8;
-        if (chunkSize > bytes.size() - body) {
-            throw std::runtime_error("truncated WAV chunk in " + path.string());
-        }
-        if (std::memcmp(bytes.data() + offset, "fmt ", 4) == 0) {
-            if (chunkSize < 16) throw std::runtime_error("WAV fmt chunk too short");
-            formatTag = le16(bytes.data() + body);
-            channels = le16(bytes.data() + body + 2);
-            sampleRate = le32(bytes.data() + body + 4);
-            blockAlign = le16(bytes.data() + body + 12);
-            bitsPerSample = le16(bytes.data() + body + 14);
-            if (formatTag == WAVE_FORMAT_EXTENSIBLE && chunkSize >= 40) {
-                formatTag = le16(bytes.data() + body + 24);
-            }
-        } else if (std::memcmp(bytes.data() + offset, "data", 4) == 0) {
-            sampleData = bytes.data() + body;
-            sampleBytes = chunkSize;
-        }
-        const std::size_t padded = static_cast<std::size_t>(chunkSize) + (chunkSize & 1U);
-        if (padded > bytes.size() - body) break;
-        offset = body + padded;
-    }
-
-    if (sampleData == nullptr || sampleBytes == 0 || channels == 0 || sampleRate == 0) {
-        throw std::runtime_error("no decoded PCM samples available in " + path.string());
-    }
-    if (formatTag != WAVE_FORMAT_PCM && formatTag != WAVE_FORMAT_IEEE_FLOAT) {
-        throw std::runtime_error("waveform preview requires decoded PCM audio");
-    }
-
-    const std::size_t bytesPerSample = (bitsPerSample + 7U) / 8U;
-    const std::size_t minimumFrameBytes = bytesPerSample * channels;
-    const std::size_t frameBytes = blockAlign == 0 ? minimumFrameBytes : blockAlign;
-    if (bytesPerSample == 0 || frameBytes < minimumFrameBytes) {
-        throw std::runtime_error("invalid PCM block alignment");
-    }
-
-    auto decodeSample = [&](const unsigned char* sample) -> double {
-        if (formatTag == WAVE_FORMAT_PCM && bitsPerSample == 8) {
-            return (static_cast<int>(sample[0]) - 128) / 128.0;
-        }
-        if (formatTag == WAVE_FORMAT_PCM && bitsPerSample == 16) {
-            return static_cast<std::int16_t>(le16(sample)) / 32768.0;
-        }
-        if (formatTag == WAVE_FORMAT_PCM && bitsPerSample == 24) {
-            std::int32_t value = static_cast<std::int32_t>(sample[0]) |
-                                 (static_cast<std::int32_t>(sample[1]) << 8) |
-                                 (static_cast<std::int32_t>(sample[2]) << 16);
-            if ((value & 0x00800000) != 0) value |= static_cast<std::int32_t>(0xff000000);
-            return static_cast<double>(value) / 8388608.0;
-        }
-        if (formatTag == WAVE_FORMAT_PCM && bitsPerSample == 32) {
-            return static_cast<std::int32_t>(le32(sample)) / 2147483648.0;
-        }
-        if (formatTag == WAVE_FORMAT_IEEE_FLOAT && bitsPerSample == 32) {
-            const std::uint32_t raw = le32(sample);
-            float value = 0.0f;
-            std::memcpy(&value, &raw, sizeof(value));
-            return std::isfinite(value) ? value : 0.0;
-        }
-        if (formatTag == WAVE_FORMAT_IEEE_FLOAT && bitsPerSample == 64) {
-            std::uint64_t raw = 0;
-            for (unsigned i = 0; i < 8; ++i) raw |= static_cast<std::uint64_t>(sample[i]) << (8U * i);
-            double value = 0.0;
-            std::memcpy(&value, &raw, sizeof(value));
-            return std::isfinite(value) ? value : 0.0;
-        }
-        throw std::runtime_error("unsupported PCM waveform format");
-    };
-
-    DecodedWaveform waveform;
-    waveform.sampleRate = sampleRate;
-    const std::size_t frameCount = sampleBytes / frameBytes;
-    waveform.mono.reserve(frameCount);
-    for (std::size_t frame = 0; frame < frameCount; ++frame) {
-        const unsigned char* frameStart = sampleData + frame * frameBytes;
-        double sum = 0.0;
-        for (std::uint16_t channel = 0; channel < channels; ++channel) {
-            sum += decodeSample(frameStart + static_cast<std::size_t>(channel) * bytesPerSample);
-        }
-        waveform.mono.push_back(static_cast<float>(
-            std::clamp(sum / static_cast<double>(channels), -1.0, 1.0)));
-    }
-    if (waveform.mono.empty()) throw std::runtime_error("decoded waveform is empty");
-    return waveform;
+    const auto audio = neolip::decodeAudio(path);
+    if (audio->channelChoiceRequired) throw std::runtime_error(audio->warnings.front().message);
+    return audio->waveform;
 }
 
 void writePcm16WaveformSegment(const std::filesystem::path& path,
@@ -613,6 +521,7 @@ void writePcm16WaveformSegment(const std::filesystem::path& path,
     out.write("data", 4);
     write32(dataSize);
     for (std::size_t i = start; i < end; ++i) {
+        if ((i & 63) == 0) checkWork();
         const double value = std::clamp(static_cast<double>(waveform.mono[i]), -1.0, 1.0);
         const auto pcm = static_cast<std::int16_t>(std::lrint(value * 32767.0));
         write16(static_cast<std::uint16_t>(pcm));

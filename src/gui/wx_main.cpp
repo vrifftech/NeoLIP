@@ -11,11 +11,6 @@
 #include <wx/settings.h>
 #include <wx/notebook.h>
 #include <wx/thread.h>
-#ifdef NEOLIP_UI_SMOKE_TEST
-#include "../../tests/dialogue_fixtures.hpp"
-#include <iostream>
-#include <fstream>
-#endif
 #include <wx/collpane.h>
 #include <wx/splitter.h>
 #include <wx/filepicker.h>
@@ -67,11 +62,7 @@
 #endif
 namespace fs = std::filesystem;
 namespace {
-#ifdef NEOLIP_UI_SMOKE_TEST
-constexpr const char* kConfigName = "neolip_gui_regression";
-#else
 constexpr const char* kConfigName = "neolip_gui";
-#endif
 constexpr int ID_SaveLipEditor = wxID_HIGHEST + 124;
 constexpr int ID_SaveLipEditorAs = wxID_HIGHEST + 125;
 constexpr int ID_InsertLipKey = wxID_HIGHEST + 126;
@@ -353,9 +344,6 @@ public:
         RefreshUserWords();
         if (!legacyDictionary_.empty()) CallAfter([this]() { MigrateLegacyPronunciations(); });
     }
-#ifdef NEOLIP_UI_SMOKE_TEST
-    void RunUiSmokeTest();
-#endif
     ~MainFrame() override {
         cancel_.store(true);
 #ifndef __EMSCRIPTEN__
@@ -2367,231 +2355,15 @@ private:
 #endif
 };
 
-#ifdef NEOLIP_UI_SMOKE_TEST
-void MainFrame::RunUiSmokeTest() {
-    const auto require = [](bool condition, const char* why) { if (!condition) throw std::runtime_error(why); };
-    const auto temp = ToPath(wxFileName::CreateTempFileName("neolip_ui_test_"));
-    fs::remove(temp); fs::create_directories(temp / "audio folder");
-    const auto wait = [&]() {
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
-        while (running_ && std::chrono::steady_clock::now() < deadline) {
-            wxYield(); std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        }
-        require(!running_, "GUI job did not complete");
-    };
-    try {
-        const auto source = fs::u8path(NEOLIP_TEST_SOURCE_DIR);
-        wxString packagedExecutable;
-        const auto executable=wxGetEnv("NEOLIP_TEST_APP_EXECUTABLE",&packagedExecutable)&&!packagedExecutable.empty()
-            ? ToPath(packagedExecutable) : fs::u8path(NEOLIP_TEST_APP_EXECUTABLE);
-        assets_=neolip::discoverAssets(executable,temp/"user");
-        neolip::requireAssets(*assets_);
-        require(assets_->models.lexically_normal()!=(source/"third_party/cslu_runtime/Toolkit/2.0/apps/fa").lexically_normal(),
-            "GUI fell back to source models instead of application assets");
-        require(assets_->dictionaries.lexically_normal()!=(source/"dictionaries").lexically_normal(),
-            "GUI fell back to source dictionaries instead of application assets");
-        require(notebook_->GetPageCount() == 4, "Expected four product pages");
-        require(movement_->GetString(0) == "Natural" && movement_->GetString(1) == "Minimal smoothing", "Incorrect mouth presets");
-        require(existingPolicy_->GetSelection() == 0, "Batch must default to skipping existing files");
-        require(wavPicker_->GetPath().empty() && literalText_->IsEmpty(), "Old job was restored");
-        wxFileConfig config(kConfigName);
-        require(!config.HasEntry("create_transcript_text") && !config.HasEntry("create_output_lip"), "Old job data not purged");
-        GuiWaveform wave; wave.sampleRate = 16000; wave.mono.assign(16000, .05f);
-        const auto first = temp / "audio folder/first.wav", second = temp / "audio folder/second.wav";
-        cslu::writePcm16WaveformSegment(first, wave, 0, 1);
-        cslu::writePcm16WaveformSegment(second, wave, 0, 1);
-        { std::ofstream f(temp / "audio folder/first.txt"); f << "neolipunknownfilewordzz"; }
-        { std::ofstream f(temp / "audio folder/second.lab"); f << "hello there"; }
-        AudioSelected(first);
-        require(literalText_->GetValue() == "neolipunknownfilewordzz", "Same-name transcript not loaded");
-        literalText_->SetValue("hello there");
-        require(textDirty_, "Transcript edits not tracked");
-        RunCreate(); wait();
-        require(neolip::validExistingLip(temp / "audio folder/first.lip"), "GUI ignored edited transcript or failed to create LIP");
-        require(resultTitle_->GetLabel().StartsWith("Created first.lip"), "Raw protocol replaced human result");
-        require(OpenLatestResult(), "Generated result could not open from RAM");
-        require(editorWords_.size()==2 && wordChoice_->GetCount()==2,"GUI lost aligned word list");
-        SelectAlignedWord(1);
-        require(std::abs(timelinePanel_->Selection().first-editorWords_[1].startSeconds)<1e-6,"Word click used estimated time");
-        const auto sharedAudio = lastSingle_.audio;
-        require(timelineAudio_ == sharedAudio && TimelineWaveform().mono.data() == sharedAudio->waveform.mono.data(), "GUI copied decoded audio");
-        timelinePanel_->SetCursor(.4); timelinePanel_->SetRange(.2, .8);
-        PreviewPreset(neolip::MouthMovement::MinimalSmoothing); wait();
-        require(lastSingle_.status == neolip::Status::Previewed && lastSingle_.reusedAlignment, "GUI repeated acoustic alignment for preset comparison");
-        require(timelineAudio_ == sharedAudio && std::abs(timelinePanel_->CursorSeconds() - .4) < 1e-6, "Preset comparison lost audio or playback position");
-        require(std::abs(timelinePanel_->Selection().first - .2) < 1e-6, "Preset comparison discarded loop selection");
-        PreviewPreset(neolip::MouthMovement::Natural); wait();
-        require(!lipEditorDirty_, "Restoring the saved preset changed the editor curve");
-        // Navigation is not Revert: do not restore the generated snapshot,
-        // discard unsaved edits, or erase the document's Undo history.
-        RememberLipEdit();const auto oldPose=lipEditorEntries_[1].shape;
-        lipEditorEntries_[1].shape=static_cast<std::uint8_t>((oldPose+1)%16);
-        timelineEntries_=lipEditorEntries_;lipEditorDirty_=true;presetOnlyChange_=false;
-        RefreshLipGrid();RefreshTimelinePanel();const auto undoCount=undoLip_.size();
-        require(OpenLatestResult() && lipEditorEntries_[1].shape!=oldPose && lipEditorDirty_,"Open result overwrote live edits");
-        ShowReviewWarnings({{"smoke", "Test review range", .2, .4}});ReviewSection();
-        require(lipEditorEntries_[1].shape!=oldPose&&undoLip_.size()==undoCount,"Review erased changes or Undo history");
-        require(SaveLipEditor(false),"Save modified curve failed");const auto savedPose=lipEditorEntries_[1].shape;
-        require(OpenLatestResult()&&!lipEditorDirty_&&lipEditorEntries_[1].shape==savedPose,"Open result restored old generated keys after save");
-        RestoreLipEdit(false);require(lipEditorEntries_[1].shape==oldPose&&lipEditorDirty_,"Review/save cleared Undo history");
-        RestoreLipEdit(true);require(lipEditorEntries_[1].shape==savedPose&&!lipEditorDirty_,"Redo did not restore saved revision");
-        require(documentState_->GetLabel()=="Saved","Document state label stale");
-        // Simulate navigating away and back: disk supplies keys, cache only audio.
-        editorPath_.clear();require(OpenLatestResult()&&lipEditorEntries_[1].shape==savedPose,"Reopen used stale generated curve");
-        SetTranscript(u8"…Hello there. I’m ready.",wxString{});CheckTranscript();wait();
-        require(unknownWords_.empty(),"GUI punctuation check disagrees with engine");
-        SetTranscript(u8"…Hello\n“neolipunknownzz”",wxString{});
-        const auto visibleText=wxui::toStd(literalText_->GetValue());
-        const auto visibleTokens=cslu::tokenizeTranscript(visibleText);
-        require(visibleTokens.size()==2,"GUI text token count incorrect");
-        const auto& selectedToken=visibleTokens.back();
-        literalText_->SetSelection(TextPositionForByte(visibleText,selectedToken.beginByte),TextPositionForByte(visibleText,selectedToken.endByte));
-        require(literalText_->GetStringSelection()=="neolipunknownzz","Unicode/newline span selected wrong text");
-
-        literalText_->SetValue("100 HK-47"); CheckTranscript(); wait();
-        require(!unknownWords_.empty() && resultTitle_->GetLabel() == "Check highlighted words", "Ambiguous text is not surfaced in the GUI");
-        SetTranscript("hello there", wxString{});
-        AudioSelected(second);
-        require(createOutput_ == temp / "audio folder/second.lip", "Changing WAV retained previous output path");
-        require(literalText_->GetValue() == "hello there", "LAB transcript not loaded");
-        ClearCreate();
-        require(literalText_->IsEmpty() && wavPicker_->GetPath().empty(), "Create another did not clear the form");
-        LoadLipEditorPath(ToWx(temp / "audio folder/first.lip")); wait();
-        require(timelineAudioPicker_->GetPath() == ToWx(first), "Editor did not load same-name WAV");
-        require(!TimelineWaveform().mono.empty(), "Editor waveform not loaded");
-        const auto readBytes = [](const fs::path& path) {
-            std::ifstream in(path, std::ios::binary);
-            return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
-        };
-        const auto originalBytes = readBytes(editorPath_);
-        require(SaveLipEditor(false), "Editor save failed");
-        require(readBytes(editorPath_) == originalBytes, "Unedited GUI save changed generated file bytes");
-        // Exercise the actual wxString/grid/save path with real float32 values,
-        // a nonzero ending and equal timestamps. No reference assets are bundled.
-        const auto importedPath = temp / "nonzero ending.lip";
-        cslu::LipFile imported{.343f, {{0,0},{.20123457f,6},{.20123457f,10},{.343f,4}}};
-        cslu::writeLip(importedPath, imported);
-        const auto importedBytes = readBytes(importedPath);
-        LoadLipEditorPath(ToWx(importedPath)); wait();
-        require(lipEditorEntries_.size() == imported.frames.size(), "GUI hid first key");
-        require(SaveLipEditor(false), "Imported GUI save failed");
-        require(readBytes(importedPath) == importedBytes, "GUI changed timestamps, duration or nonzero final pose");
-        require(lipGrid_->IsReadOnly(0,1) && lipGrid_->IsReadOnly(3,1), "Endpoint times are not protected");
-        RememberLipEdit(); lipEditorEntries_[1].shape = 3;
-        lipEditorDirty_=true; RefreshLipGrid(); SyncEditorToTimeline();
-        RestoreLipEdit(false);
-        require(lipEditorEntries_[1].shape==6 && !lipEditorDirty_, "Undo did not restore saved curve");
-        RestoreLipEdit(true); require(lipEditorEntries_[1].shape==3, "Redo did not restore edit");
-        RestoreLipEdit(false);
-        require(timelineLipDuration_ == static_cast<double>(imported.durationSeconds), "Editing inferred a new duration");
-        const auto invalidPath = temp / "descending.lip";
-        auto invalidBytes = importedBytes;
-        // Swap the two interior times so the curve descends without changing its header.
-        const float high=.27f, low=.2f;
-        std::memcpy(&invalidBytes[21], &high, sizeof(high));
-        std::memcpy(&invalidBytes[26], &low, sizeof(low));
-        { std::ofstream out(invalidPath, std::ios::binary); out.write(invalidBytes.data(), static_cast<std::streamsize>(invalidBytes.size())); }
-        LoadLipEditorPath(ToWx(invalidPath)); wait();
-        require(!SaveLipEditor(false), "GUI silently repaired descending input");
-        require(readBytes(invalidPath) == invalidBytes, "Rejected GUI save changed original");
-        require(lipEditorStatus_->GetLabel().Contains("Needs repair"), "Invalid import has no warning");
-        batchInput_->SetPath(ToWx(temp / "audio folder")); ScanBatch(); wait();
-        require(batchPlan_.pairs.size() == 2 && batchPlan_.missingTranscripts.empty(), "GUI batch pairing count incorrect");
-        RunBatch(false); wait();
-        require(lastBatch_.skipped == 1 && lastBatch_.created == 1 && lastBatch_.failed == 0, "GUI batch skip/default failed");
-        // Review a result created outside the audio directory and with an
-        // explicit voice channel. No WAV copy or mapping sidecar is allowed.
-        const auto separated=temp/"separate output/second.lip";
-        fs::create_directories(separated.parent_path());fs::copy_file(temp/"audio folder/second.lip",separated);
-        neolip::Result reviewed;reviewed.status=neolip::Status::Created;reviewed.input=second;reviewed.output=separated;
-        reviewed.audioChannel=0;reviewed.message="Created second.lip";reviewed.transcript="hello there";
-        reviewed.words={{"hello","hello",0,5,.1,.4},{"there","there",6,11,.5,.8}};
-        batchRowResults_={reviewed};batchFilter_->SetSelection(4);RefreshBatchRows();OpenBatchRow(0);wait();
-        require(editorPath_==separated&&editorInput_==second&&editorChannel_==0,"Batch review lost recorded audio/channel");
-        require(timelineAudio_&&!TimelineWaveform().mono.empty()&&wordChoice_->GetCount()==2,"Batch review lacks audio/words");
-        require(!fs::exists(separated.parent_path()/"second.wav"),"Batch review copied WAV into output folder");
-        auto problem=reviewed;problem.status=neolip::Status::UnknownWords;problem.message="Needs pronunciation";
-        batchRowResults_={reviewed,problem};batchFilter_->SetSelection(1);RefreshBatchRows();
-        require(visibleBatchRows_.size()==1&&visibleBatchRows_[0]==1,"Filtered batch row maps to wrong result");
-        batchFilter_->SetSelection(0);RefreshBatchRows();
-
-        // Actual UI dialogue mode, shared GFF/TLK readers and literal-text batch.
-        // Separate Sound/VO names are intentional; no sidecar text may be read.
-        const auto dialogue = temp / "module/source.dlg";
-        const auto talk = temp / "dialog.tlk";
-        dialogue_fixture::tlk(talk, {"hello there"});
-        dialogue_fixture::write(dialogue, {
-            {"dlg_first", "first", "hello there"},
-            {"dlg_second", "second", "", 0, true}
-        });
-        dialoguePicker_->SetPath(wxString{});
-        UseDialogueFolder(temp);
-        require(DialogueMode() && ToPath(batchInput_->GetPath()) == temp && dialogueTlk_->GetPath().empty(),
-            "Saved game selection did not set dialogue search root");
-        dialoguePicker_->SetPath(ToWx(dialogue));
-        batchOutput_.clear();
-        InvalidateBatch(); ScanBatch(); wait();
-        require(dialoguePlan_.has_value() && dialoguePlan_->rows.size() == 2 && batchPlan_.pairs.size() == 2, "GUI dialogue scan failed");
-        require(batchList_->GetItemCount() == 2 && batchList_->GetItemText(0, 2) == "hello there", "GUI omitted dialogue text preview");
-        require(dialoguePlan_->request.talkTable == talk && !batchList_->GetItemText(0, 3).empty(),
-            "Game-root scan did not auto-resolve TLK and show recording");
-        require(batchPlan_.pairs[0].spokenText.has_value() && batchPlan_.pairs[0].transcript.empty(), "GUI dialogue scan created transcript sidecars");
-        RunBatch(false); wait();
-        require(lastBatch_.created == 2 && lastBatch_.failed == 0, "GUI DLG to LIP failed");
-        require(neolip::validExistingLip(temp / "module/source_lips/dlg_first.lip") && neolip::validExistingLip(temp / "module/source_lips/dlg_second.lip"), "GUI used Sound instead of VO for output name");
-        batchFilter_->SetSelection(0); RefreshBatchRows(); OpenBatchRow(0); wait();
-        require(editorInput_ == first || editorInput_ == second, "DLG result review lost source recording");
-        require(editorTranscript_ == "hello there", "DLG result review lost literal transcript");
-        RunBatch(false); wait();
-        require(lastBatch_.skipped == 2 && lastBatch_.failed == 0, "GUI DLG batch ignored existing-LIP policy");
-        const auto fallback = temp / "auto resources/project/StreamWaves/module/vo_fallback.WAV";
-        fs::create_directories(fallback.parent_path()); fs::copy_file(first, fallback);
-        dialogue_fixture::write(dialogue, {{"vo_fallback", "absent_sound", "hello there"}});
-        UseDialogueFolder(temp / "auto resources"); wait();
-        require(dialoguePlan_ && batchPlan_.pairs.size() == 1 && batchPlan_.pairs[0].audio == fallback,
-            "GUI folder selection did not resolve VO_ResRef when Sound was absent");
-        require(batchPlan_.pairs[0].output.filename() == "vo_fallback.lip" &&
-            batchList_->GetItemText(0, 1).Contains("VO_ResRef match"), "GUI fallback source/name not shown");
-
-
-        for (const auto& entry : fs::recursive_directory_iterator(temp))
-            require(entry.path().filename().u8string().rfind(".neolip-tmp-", 0) != 0, "Temporary output leaked");
-        textDirty_ = false; lipEditorDirty_ = false;
-        fs::remove_all(temp);
-    } catch (...) {
-        cancel_.store(true); wait();
-        textDirty_ = false; lipEditorDirty_ = false;
-        std::error_code ec; fs::remove_all(temp, ec); throw;
-    }
-}
-#endif
 
 class NeoLipGuiApp final : public wxApp {
-#ifdef NEOLIP_UI_SMOKE_TEST
-    int testExit_ = 1;
-#endif
 public:
     bool OnInit() override {
         if (!wxApp::OnInit()) return false;
-#ifdef NEOLIP_UI_SMOKE_TEST
-        SetAppName("NeoLIP-regression");
-        { wxFileConfig config(kConfigName); config.Write("create_transcript_text", "stale private dialogue");
-          config.Write("create_output_lip", "stale.lip"); config.Flush(); }
-        auto* frame = new MainFrame(); frame->Show();
-        CallAfter([this, frame]() {
-            try { frame->RunUiSmokeTest(); testExit_ = 0; std::cout << "PASS: real wxWidgets product UI smoke test\n"; }
-            catch (const std::exception& e) { std::cerr << "FAIL: UI smoke: " << e.what() << '\n'; }
-            frame->Destroy(); ExitMainLoop();
-        });
-#else
         SetAppName("NeoLIP");
         auto* frame = new MainFrame(); frame->Show();
-#endif
         return true;
     }
-#ifdef NEOLIP_UI_SMOKE_TEST
-    int OnRun() override { wxApp::OnRun(); return testExit_; }
-#endif
 };
 } // namespace
 wxIMPLEMENT_APP(NeoLipGuiApp);

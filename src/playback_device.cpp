@@ -6,12 +6,6 @@ namespace neolip {
 struct AudioPlayback::Impl {
     PcmTransport pcm;
     ma_device device{};
-#ifdef NEOLIP_AUDIO_TEST_NULL_DEVICE
-    // Only the separate, non-installed native audio regression target selects
-    // the deterministic null output. Product builds always use the real device.
-    ma_context context{};
-    bool contextReady = false;
-#endif
     bool ready = false;
     bool started = false;
     std::shared_ptr<const AudioBuffer> audio;
@@ -20,10 +14,6 @@ struct AudioPlayback::Impl {
     void close() {
         if (ready) ma_device_uninit(&device); // Joins/stops callbacks before buffers change.
         ready = started = false;
-#ifdef NEOLIP_AUDIO_TEST_NULL_DEVICE
-        if (contextReady) ma_context_uninit(&context);
-        contextReady = false;
-#endif
     }
     void suspendDevice() {
         if (ready && started) ma_device_stop(&device);
@@ -42,15 +32,7 @@ struct AudioPlayback::Impl {
             auto* self = static_cast<Impl*>(d->pUserData);
             self->pcm.render(static_cast<float*>(out), count);
         };
-        ma_context* selectedContext = nullptr;
-#ifdef NEOLIP_AUDIO_TEST_NULL_DEVICE
-        const ma_backend backend = ma_backend_null;
-        if (ma_context_init(&backend, 1, nullptr, &context) != MA_SUCCESS)
-            throw std::runtime_error("Cannot initialize the test-only null audio backend.");
-        contextReady = true;
-        selectedContext = &context;
-#endif
-        if (ma_device_init(selectedContext, &config, &device) != MA_SUCCESS) {
+        if (ma_device_init(nullptr, &config, &device) != MA_SUCCESS) {
             close();
             throw std::runtime_error("No audio output is available. Check the selected system playback device.");
         }

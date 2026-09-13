@@ -557,6 +557,7 @@ std::vector<UserPronunciation> readUserPronunciations(const fs::path& dictionary
     if (!input) throw std::runtime_error("Cannot read your pronunciation dictionary.");
     std::string line, sounds;
     while (std::getline(input, line)) {
+        cslu::checkWork();
         line = trim(line);
         if (line.rfind("# sounds-like: ", 0) == 0) { sounds = line.substr(15); continue; }
         if (line.empty() || line[0] == '#') continue;
@@ -604,12 +605,14 @@ void writeUserEntries(const fs::path& destination, std::vector<UserPronunciation
         std::ofstream out(output.temporary, std::ios::binary);
         out << "# NeoLIP user pronunciations. Bundled CSLU and KOTOR dictionaries are unchanged.\n";
         for (const auto& entry : entries) {
+            cslu::checkWork();
             if (!entry.soundsLike.empty()) out << "# sounds-like: " << entry.soundsLike << '\n';
             out << entry.word << " = " << entry.phones << " ;\n";
         }
         out.flush();
         if (!out) throw std::runtime_error("Cannot save your pronunciation dictionary.");
     }
+    cslu::checkWork();
     output.commit(true);
 }
 }
@@ -626,7 +629,9 @@ void importUserPronunciations(const Assets& assets, const std::vector<UserPronun
     if (imported.empty()) throw std::runtime_error("This dictionary does not contain any pronunciations.");
     auto entries = readUserPronunciations(assets.userDictionary);
     for (const auto& value : imported) {
+        cslu::checkWork();
         const auto entry = resolvePronunciation(assets, value);
+        cslu::checkWork();
         const auto old = std::find_if(entries.begin(), entries.end(), [&](const auto& item) { return lower(item.word) == entry.word; });
         if (old == entries.end()) entries.push_back(entry);
         else if (replaceExisting) *old = entry;

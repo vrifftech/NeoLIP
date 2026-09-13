@@ -19,6 +19,7 @@
 #include <wx/fileconf.h>
 #include <wx/sizer.h>
 #include <wx/wrapsizer.h>
+#include <wx/wupdlock.h>
 #include <wx/scrolwin.h>
 #include <wx/filedlg.h>
 #include <wx/dirdlg.h>
@@ -97,7 +98,10 @@ class LipTimelinePanel final : public wxScrolledWindow {
 public:
     explicit LipTimelinePanel(wxWindow* parent)
         :wxScrolledWindow(parent,wxID_ANY,wxDefaultPosition,parent->FromDIP(wxSize(-1,270)),wxBORDER_SIMPLE|wxWANTS_CHARS) {
-        SetBackgroundStyle(wxBG_STYLE_PAINT);SetScrollRate(FromDIP(20),0);
+        SetBackgroundStyle(wxBG_STYLE_PAINT);
+        // This canvas owns its scrolling geometry; there is no child sizer.
+        SetAutoLayout(false);
+        SetScrollRate(FromDIP(20), 0);
         SetName("Mouth animation timeline");
         SetToolTip("Space: play/pause. Arrows: seek 10 ms; Ctrl+arrows: 100 ms. Shift+drag: select a loop. Home/End: clip limits. F: fit clip. Z: zoom to selection.");
         Bind(wxEVT_PAINT,&LipTimelinePanel::OnPaint,this);
@@ -116,8 +120,12 @@ public:
             if(dialog.ShowModal()==wxID_OK)SetSelectedShape(dialog.GetSelection());
         });
         Bind(wxEVT_MOUSE_CAPTURE_LOST,[this](wxMouseCaptureLostEvent&){dragging_=selecting_=false;});
-        Bind(wxEVT_SIZE,[this](wxSizeEvent& e){if(fit_)FitClip();else UpdateVirtualSize();e.Skip();});
-        Bind(wxEVT_CHAR,&LipTimelinePanel::OnKey,this);UpdateVirtualSize();
+        Bind(wxEVT_SIZE, [this](wxSizeEvent& event) {
+            event.Skip();
+            QueueViewportUpdate();
+        });
+        Bind(wxEVT_CHAR,&LipTimelinePanel::OnKey,this);
+        QueueViewportUpdate();
     }
     bool AcceptsFocus() const override {return true;}
     void SetData(std::shared_ptr<const neolip::AudioBuffer> audio,std::vector<GuiLipEntry> entries,double lipDuration) {
@@ -142,7 +150,10 @@ public:
         Refresh();
     }
     void SetZoom(int z){fit_=false;pixelsPerSecond_=FromDIP(160)*std::clamp(z,1,20);UpdateVirtualSize();Refresh();}
-    void FitClip(){fit_=true;pixelsPerSecond_=std::max(.001,double(std::max(50,GetClientSize().x-2*Margin()))/duration_);UpdateVirtualSize();Scroll(0,0);Refresh();}
+    void FitClip() {
+        fit_ = true;
+        QueueViewportUpdate();
+    }
     void ZoomSelection(){const auto range=Selection();if(range.second<=range.first)return;fit_=false;pixelsPerSecond_=std::clamp(double(std::max(50,GetClientSize().x-2*Margin()))/(range.second-range.first),.001,double(FromDIP(3200)));UpdateVirtualSize();int x=0,y=0;GetScrollPixelsPerUnit(&x,&y);if(x)Scroll(std::max(0,XFromTime(range.first)-Margin())/x,0);Refresh();}
     void SetSelectedShape(int shape){
         if(selected_<0||selected_>=static_cast<int>(entries_.size()))return;
@@ -163,13 +174,52 @@ private:
     std::function<void(std::size_t)> wordCallback_;
     double lipDuration_=0,duration_=1,cursorSeconds_=0,pixelsPerSecond_=160,rangeA_=0,rangeB_=0;
     int selected_=-1;bool dragging_=false,dragEdited_=false,selecting_=false,fit_=true,sorted_=true;
+    bool viewportUpdateQueued_ = false;
+    bool updatingVirtualSize_ = false;
     std::function<void()> beforeEdit_,playCallback_;
     std::function<void(double)> seekCallback_;
     std::function<void(int,const GuiLipEntry*)> selectionCallback_;
     int Margin()const{return FromDIP(62);}
     int XFromTime(double t)const{return Margin()+static_cast<int>(std::lround(std::clamp(std::isfinite(t)?t*pixelsPerSecond_:0.0,0.0,100000000.0)));}
     double TimeFromX(int x)const{return std::max(0.0,double(x-Margin())/pixelsPerSecond_);}
-    void UpdateVirtualSize(){SetVirtualSize(std::max(GetClientSize().x,XFromTime(duration_)+Margin()),FromDIP(265));}
+    void QueueViewportUpdate() {
+        if (viewportUpdateQueued_ || IsBeingDeleted()) return;
+        viewportUpdateQueued_ = true;
+        // Changing scrollbars can synchronously raise another size event. Wait
+        // until wxWidgets has finished the current layout, and coalesce events.
+        CallAfter([this]() {
+            if (IsBeingDeleted()) return;
+            const wxSize before = GetClientSize();
+            if (before.x > 0 && before.y > 0) {
+                if (fit_) {
+                    const int drawable = std::max(1, before.x - 2 * Margin());
+                    pixelsPerSecond_ = std::max(.001, double(drawable) / duration_);
+                }
+                UpdateVirtualSize();
+                int scrollX = 0, scrollY = 0;
+                GetViewStart(&scrollX, &scrollY);
+                if (fit_ && (scrollX != 0 || scrollY != 0)) Scroll(0, 0);
+                Refresh(false);
+            }
+            viewportUpdateQueued_ = false;
+            // Showing/removing a scrollbar can change the client dimensions.
+            // Refit once those dimensions settle, never recurse from OnSize.
+            if (GetClientSize() != before) QueueViewportUpdate();
+        });
+    }
+    void UpdateVirtualSize() {
+        if (updatingVirtualSize_) return;
+        const wxSize client = GetClientSize();
+        if (client.x <= 0 || client.y <= 0) return;
+        // Fit mode must not invent a minimum scroll width for a hidden/narrow
+        // notebook page: that made fitting and scrollbar layout fight each other.
+        const int width = fit_ ? client.x : std::max(client.x, XFromTime(duration_) + Margin());
+        const wxSize desired(width, std::max(client.y, FromDIP(265)));
+        if (GetVirtualSize() == desired) return;
+        updatingVirtualSize_ = true;
+        SetVirtualSize(desired);
+        updatingVirtualSize_ = false;
+    }
     void NotifySelection(){if(selectionCallback_)selectionCallback_(selected_,selected_>=0&&selected_<static_cast<int>(entries_.size())?&entries_[static_cast<std::size_t>(selected_)]:nullptr);}
     void Seek(double t){SetCursor(t);if(seekCallback_)seekCallback_(cursorSeconds_);}
     int Hit(int x)const{int best=-1,distance=FromDIP(10);for(int i=0;i<static_cast<int>(entries_.size());++i){const int d=std::abs(x-XFromTime(entries_[static_cast<std::size_t>(i)].timeSeconds));if(d<distance){distance=d;best=i;}}return best;}
@@ -250,7 +300,7 @@ public:
 
 // Only value objects cross the worker/UI boundary. No worker touches a widget.
 struct UiMessage {
-    enum class Kind { Progress, Preview, Single, Plan, Item, Batch, Scan, Lookup, Audio, BatchAudio, Error };
+    enum class Kind { Progress, Preview, Single, Plan, Item, Batch, Scan, Lookup, Audio, BatchAudio, UserWords, LegacyImported, Error };
     Kind kind = Kind::Error;
     neolip::Progress progress;
     neolip::Result single;
@@ -261,6 +311,7 @@ struct UiMessage {
     cslu::TextToNtpResult lookup;
     std::shared_ptr<const neolip::AudioBuffer> audio;
     fs::path path;
+    std::vector<neolip::UserPronunciation> userEntries;
     std::string error;
 };
 wxDEFINE_EVENT(NEOLIP_ENGINE_EVENT, wxThreadEvent);
@@ -341,8 +392,12 @@ public:
 #endif
         ApplyDarkMode(settings_.darkMode());
         wxui::setStatusText(*this, "Choose audio and enter its spoken text.");
-        RefreshUserWords();
-        if (!legacyDictionary_.empty()) CallAfter([this]() { MigrateLegacyPronunciations(); });
+        // Opening the application must not read dictionaries or validate an old
+        // import. Load the list only when its page is used; migration is explicit.
+        notebook_->Bind(wxEVT_NOTEBOOK_PAGE_CHANGED, [this](wxBookCtrlEvent& event) {
+            event.Skip();
+            if (event.GetSelection() == 3 && !userWordsLoaded_ && !running_) LoadUserWords();
+        });
     }
     ~MainFrame() override {
         cancel_.store(true);
@@ -378,6 +433,8 @@ private:
     wxTextCtrl* lookup_ = nullptr;
     std::optional<neolip::Assets> assets_;
     std::vector<neolip::UserPronunciation> userEntries_;
+    bool userWordsLoaded_ = false;
+    wxButton* legacyImportButton_ = nullptr;
     std::vector<std::string> unknownWords_;
     neolip::ScanResult scanResult_;
     neolip::BatchPlan batchPlan_;
@@ -493,9 +550,20 @@ private:
     }
     void BuildMenus() {
         auto* menuBar = new wxMenuBar(); auto* file = new wxMenu();
-        gameDirectoryMenu_ = neogames::appendOpenGameDirectoryMenu(*this, *file,
-            [this](const fs::path& directory) { UseDialogueFolder(directory); },
-            neogames::GameDirectoryGameIds{"kotor", "kotor2"}, "Use Game Directory for &Dialogue");
+        auto* gameMenu = new wxMenu();
+        gameMenu->Append(wxID_ANY, "Saved game directories")->Enable(false);
+        file->AppendSubMenu(gameMenu, "Use Game Directory for &Dialogue");
+        // The shared menu probes saved paths (including unavailable drives).
+        // Construct it on demand, not before the main window can be displayed.
+        Bind(wxEVT_MENU_OPEN, [this, gameMenu](wxMenuEvent& event) {
+            if (event.GetMenu() == gameMenu && !gameDirectoryMenu_) {
+                gameDirectoryMenu_ = std::make_unique<neogames::OpenGameDirectoryMenu>(
+                    *this, *gameMenu,
+                    [this](const neogames::SavedGameDirectory& directory) { UseDialogueFolder(directory.path); },
+                    neogames::GameDirectoryGameIds{"kotor", "kotor2"});
+            }
+            event.Skip();
+        });
         file->AppendSeparator(); file->Append(wxID_EXIT, "E&xit"); menuBar->Append(file, "&File");
         auto* view = new wxMenu(); darkModeMenuItem_ = view->AppendCheckItem(ID_ToggleDarkMode, "Dark mode");
         view->AppendSeparator(); view->Append(ID_FontIncrease, "Increase Font Size\tCtrl++");
@@ -881,6 +949,9 @@ private:
         Button(panel, actions, "Edit selected...", [this]() { EditSelectedPronunciation(); });
         Button(panel, actions, "Remove selected", [this]() { RemoveSelectedPronunciation(); });
         Button(panel, actions, "Import dictionary...", [this]() { ImportUserDictionary(); });
+        legacyImportButton_ = Button(panel, actions, "Import previous dictionary", [this]() { MigrateLegacyPronunciations(); });
+        legacyImportButton_->SetToolTip("Import the dictionary saved by an older version. Your original file is never changed.");
+        legacyImportButton_->Hide();
         outer->Add(actions, 0, wxEXPAND | wxLEFT | wxRIGHT, 12);
         userList_ = new wxListCtrl(panel, wxID_ANY, wxDefaultPosition, wxSize(-1, 145), wxLC_REPORT | wxLC_SINGLE_SEL);
         userList_->InsertColumn(0, "Your word", wxLIST_FORMAT_LEFT, 160);
@@ -918,9 +989,10 @@ private:
         long movement = 0; config.Read("Preferences/MouthMovement", &movement, 0L);
         movement_->SetSelection(movement == 1 ? 1 : 0); batchMovement_->SetSelection(movement_->GetSelection());
         fontScale_ = settings_.fontScale();
-        // Migrate personal pronunciations before removing the old file-location
-        // preference. Actual dialogue text and job paths are never restored.
+        // Keep the old reference until an explicit import succeeds. Do not open
+        // this potentially large, stale, or remote file during application launch.
         legacyDictionary_ = config.Read("user_dict", wxString{});
+        legacyImportButton_->Show(!legacyDictionary_.empty());
         for (const char* key : {
             "alignment_graph_version", "anticipate_closures_ms", "anticipate_fricatives_ms", "anticipate_stops_ms",
             "batch_anticipate_closures_ms", "batch_anticipate_fricatives_ms", "batch_anticipate_stops_ms", "batch_close_on_pause_ms",
@@ -935,31 +1007,34 @@ private:
         config.Flush();
     }
     void MigrateLegacyPronunciations() {
-        // Do not change bundled dictionaries or remove the user's original file.
-        // A failure retains the legacy reference so it can be recovered later.
-        try {
-            const auto path = ToPath(legacyDictionary_);
-            if (!path.empty()) {
-                if (!fs::is_regular_file(path)) throw std::runtime_error("The previous custom dictionary is missing: " + path.u8string());
-                const auto assets = Assets();
-                const auto same = [&](const fs::path& other) {
-                    std::error_code ec; return fs::equivalent(path, other, ec) && !ec;
-                };
-                if (!same(assets.userDictionary) && !same(assets.dictionaries / "kotor_override.dict") &&
-                    !same(assets.dictionaries / "custom_dictionary.txt")) {
-                    const auto entries = neolip::readUserPronunciations(path);
-                    if (!entries.empty()) {
-                        neolip::importUserPronunciations(assets, entries, false);
-                        RefreshUserWords();
-                        SetResult("Custom pronunciations retained", "Your existing entries are now managed on the Pronunciations page.");
-                    }
-                }
+        if (running_ || legacyDictionary_.empty()) return;
+        const fs::path path = ToPath(legacyDictionary_);
+        const fs::path executable = ToPath(wxStandardPaths::Get().GetExecutablePath());
+        const fs::path userData = UserDataPath();
+        // Discovery, parsing and per-entry validation run in the existing job
+        // worker. Failure/cancellation keeps both the old reference and file.
+        StartJob([path, executable, userData](const neolip::Context& context) {
+            cslu::ScopedWorkControl control(context.work);
+            context.work.check();
+            if (context.progress) context.progress({"Importing previous pronunciations", 0, 0});
+            if (!fs::is_regular_file(path))
+                throw std::runtime_error("The previous custom dictionary is missing. Its saved location has been retained: " + path.u8string());
+            const auto assets = neolip::discoverAssets(executable, userData);
+            neolip::requireAssets(assets);
+            const auto same = [&](const fs::path& other) {
+                std::error_code ec;
+                return fs::equivalent(path, other, ec) && !ec;
+            };
+            if (!same(assets.userDictionary) && !same(assets.dictionaries / "kotor_override.dict") &&
+                !same(assets.dictionaries / "custom_dictionary.txt")) {
+                const auto entries = neolip::readUserPronunciations(path);
+                if (!entries.empty()) neolip::importUserPronunciations(assets, entries, false);
             }
-            wxFileConfig config(kConfigName); config.DeleteEntry("user_dict", false); config.Flush();
-            legacyDictionary_.clear(); SaveConfig();
-        } catch (const std::exception& e) {
-            ShowProblem(std::string("Your old custom dictionary was not changed. Import it from the Pronunciations page when available.\n") + e.what());
-        }
+            UiMessage reply;
+            reply.kind = UiMessage::Kind::LegacyImported;
+            reply.userEntries = neolip::readUserPronunciations(assets.userDictionary);
+            return reply;
+        });
     }
     void SaveConfig() {
         wxFileConfig config(kConfigName);
@@ -1838,6 +1913,22 @@ private:
                 if (pendingAudioReview_) { const auto item = *pendingAudioReview_; pendingAudioReview_.reset(); SetResult(wxui::toWx(item.message)); ShowReviewWarnings(item.warnings); }
             }
             break;
+        case UiMessage::Kind::UserWords:
+            userEntries_ = std::move(message->userEntries);
+            DisplayUserWords();
+            resultPanel_->Hide();
+            break;
+        case UiMessage::Kind::LegacyImported: {
+            userEntries_ = std::move(message->userEntries);
+            DisplayUserWords();
+            wxFileConfig config(kConfigName);
+            config.DeleteEntry("user_dict", false);
+            config.Flush();
+            legacyDictionary_.clear();
+            legacyImportButton_->Hide();
+            SetResult("Custom pronunciations imported", "Your original dictionary was not changed. Existing managed entries were preserved.");
+            break;
+        }
         case UiMessage::Kind::Error:
             pendingAudioReview_.reset();
             if (cancel_.load()) SetResult("Cancelled", wxui::toWx(message->error));
@@ -1860,17 +1951,33 @@ private:
         if (lastWasBatch_) RunBatch(true);
         else RunCreate(); // Re-read the edited visible transcript, not an old snapshot.
     }
+    void LoadUserWords() {
+        if (running_) return;
+        const auto path = UserDataPath() / "pronunciations.dict";
+        StartJob([path](const neolip::Context& context) {
+            cslu::ScopedWorkControl control(context.work);
+            context.work.check();
+            UiMessage reply;
+            reply.kind = UiMessage::Kind::UserWords;
+            reply.userEntries = neolip::readUserPronunciations(path);
+            return reply;
+        });
+    }
+    void DisplayUserWords() {
+        wxWindowUpdateLocker lock(userList_);
+        userList_->DeleteAllItems();
+        for (const auto& entry : userEntries_) {
+            const long row = userList_->InsertItem(userList_->GetItemCount(), wxui::toWx(entry.word));
+            userList_->SetItem(row, 1, wxui::toWx(entry.soundsLike));
+            userList_->SetItem(row, 2, wxui::toWx(entry.phones));
+        }
+        userWordsLoaded_ = true;
+    }
     void RefreshUserWords() {
         if (!userList_) return;
         try {
-            // Listing user entries does not require a model-location setting or
-            // creation of any file in the installation directory.
             userEntries_ = neolip::readUserPronunciations(UserDataPath() / "pronunciations.dict");
-            userList_->DeleteAllItems();
-            for (const auto& entry : userEntries_) {
-                long row = userList_->InsertItem(userList_->GetItemCount(), wxui::toWx(entry.word));
-                userList_->SetItem(row, 1, wxui::toWx(entry.soundsLike)); userList_->SetItem(row, 2, wxui::toWx(entry.phones));
-            }
+            DisplayUserWords();
         } catch (const std::exception& e) { ShowProblem(e.what()); }
     }
     bool EditPronunciation(neolip::UserPronunciation entry) {

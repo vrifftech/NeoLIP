@@ -1,4 +1,5 @@
 #include "fingerprint.hpp"
+#include <neoshared/PathUtf8.hpp>
 #include "work_control.hpp"
 #include <algorithm>
 #include <array>
@@ -37,7 +38,7 @@ public:
 std::string sha256(const std::string& data){Sha256 h;h.add(data.data(),data.size());return h.finish();}
 std::string fileFingerprint(const std::filesystem::path& file){
     const auto size=std::filesystem::file_size(file);const auto time=std::filesystem::last_write_time(file);
-    std::ifstream f(file,std::ios::binary);if(!f)throw std::runtime_error("Cannot read input: "+file.u8string());
+    std::ifstream f(file,std::ios::binary);if(!f)throw std::runtime_error("Cannot read input: "+neoshared::pathToUtf8(file));
     Sha256 h;std::array<char,65536>b{};std::uintmax_t total=0;
     while(f){cslu::checkWork();f.read(b.data(),b.size());const auto n=f.gcount();h.add(b.data(),static_cast<std::size_t>(n));total+=static_cast<std::uintmax_t>(n);}
     if(f.bad()||total!=size||size!=std::filesystem::file_size(file)||time!=std::filesystem::last_write_time(file))throw std::runtime_error("An input file changed while it was being read. Retry the job.");
@@ -47,7 +48,7 @@ std::string treeFingerprint(const std::filesystem::path& root){
     if(root.empty()||!std::filesystem::exists(root))return sha256("<absent>");
     std::vector<std::filesystem::path> files;for(const auto& f:std::filesystem::recursive_directory_iterator(root))if(f.is_regular_file())files.push_back(f.path());
     std::sort(files.begin(),files.end());std::string list;
-    for(const auto& f:files){const auto name=f.lexically_relative(root).generic_u8string();list+=std::to_string(name.size())+":"+name+fileFingerprint(f);}
+    for(const auto& f:files){const auto name=neoshared::genericPathToUtf8(f.lexically_relative(root));list+=std::to_string(name.size())+":"+name+fileFingerprint(f);}
     return sha256(list);
 }
 }

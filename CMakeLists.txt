@@ -92,7 +92,7 @@ set(NEOLIP_COMMON_DEFINITIONS
 
 add_library(neolip_core STATIC ${NEOLIP_CORE_SOURCES})
 target_include_directories(neolip_core PUBLIC src)
-target_link_libraries(neolip_core PUBLIC neolip_audio_codec)
+target_link_libraries(neolip_core PUBLIC neolip_audio_codec neoshared::path)
 target_compile_features(neolip_core PUBLIC cxx_std_17)
 if(MSVC)
     target_compile_options(neolip_core PRIVATE /W4 /permissive- /Zc:__cplusplus)

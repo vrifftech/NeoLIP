@@ -1,4 +1,5 @@
 #include "engine.hpp"
+#include <neoshared/PathUtf8.hpp>
 #include "fingerprint.hpp"
 #include "review.hpp"
 #include "graph_build.hpp"
@@ -47,7 +48,7 @@ bool file(const fs::path& path) {
     std::error_code ec;
     return fs::is_regular_file(path, ec);
 }
-std::string displayPath(const fs::path& path) { return path.u8string(); }
+std::string displayPath(const fs::path& path) { return neoshared::pathToUtf8(path); }
 void report(const Context& context, const std::string& message,
             std::size_t completed = 0, std::size_t total = 0) {
     context.work.check();
@@ -172,8 +173,8 @@ fs::path sameStem(const fs::path& source, const std::vector<std::string>& extens
         if (file(candidate)) return candidate;
         std::vector<fs::path> candidates;
         for (const auto& entry : fs::directory_iterator(parent)) {
-            if (file(entry.path()) && lower(entry.path().stem().u8string()) == lower(source.stem().u8string()) &&
-                lower(entry.path().extension().u8string()) == ext) candidates.push_back(entry.path());
+            if (file(entry.path()) && lower(neoshared::pathToUtf8(entry.path().stem())) == lower(neoshared::pathToUtf8(source.stem())) &&
+                lower(neoshared::pathToUtf8(entry.path().extension())) == ext) candidates.push_back(entry.path());
         }
         std::sort(candidates.begin(), candidates.end());
         if (candidates.size() > 1) throw std::runtime_error("More than one matching file for " + displayPath(source));
@@ -188,7 +189,7 @@ std::vector<std::string> unique(std::vector<std::string> values) {
 }
 void requireOutput(const CreateRequest& request) {
     if (!file(request.audio)) throw std::runtime_error("The selected audio file does not exist.");
-    if (request.output.empty() || lower(request.output.extension().u8string()) != ".lip")
+    if (request.output.empty() || lower(neoshared::pathToUtf8(request.output.extension())) != ".lip")
         throw std::runtime_error("Choose an output filename ending in .lip.");
     if (normalized(request.audio) == normalized(request.output)) throw std::runtime_error("Audio and output paths must be different.");
     if (!request.replaceExisting && fs::exists(request.output))
@@ -226,7 +227,7 @@ Assets discoverAssets(const fs::path& executable, const fs::path& userDataDirect
         base / "../share/NeoLIP", base / "../share/neolip", base / "../.."};
 #ifdef NEOLIP_SOURCE_ASSET_ROOT
     // Available only in uninstalled developer builds, never searched first.
-    candidates.push_back(fs::u8path(NEOLIP_SOURCE_ASSET_ROOT));
+    candidates.push_back(neoshared::pathFromUtf8(NEOLIP_SOURCE_ASSET_ROOT));
 #endif
     for (const auto& path : candidates) {
         const auto root = normalized(path);
@@ -405,7 +406,7 @@ Result Engine::create(const CreateRequest& request, const Context& context) {
         report(context,"Saving LIP");AtomicOutput output(request.output);
         cslu::writeLip(output.temporary,*lip);validateWritten(output.temporary);context.work.check();output.commit(request.replaceExisting);
         result.previewLip=lip;result.status=Status::Created;result.durationSeconds=lip->durationSeconds;result.mouthKeys=lip->frames.size();
-        result.message="Created "+request.output.filename().u8string();
+        result.message="Created "+neoshared::pathToUtf8(request.output.filename());
         if(!result.warnings.empty())result.message+=" - review suggested";
     } catch(const cslu::OperationCancelled&) {result.status=Status::Cancelled;result.message="Cancelled. No partial LIP was saved.";}
       catch(const std::exception& e) {result.status=Status::Failed;result.message=e.what();}
@@ -420,7 +421,7 @@ BatchPlan planBatch(const fs::path& input, const fs::path& output, bool recursiv
     const auto consider = [&](const fs::directory_entry& entry) {
         context.work.check();
         if (entry.is_symlink()) return;
-        if (entry.is_regular_file() && (lower(entry.path().extension().u8string()) == ".wav" || lower(entry.path().extension().u8string()) == ".mp3")) wavs.push_back(entry.path());
+        if (entry.is_regular_file() && (lower(neoshared::pathToUtf8(entry.path().extension())) == ".wav" || lower(neoshared::pathToUtf8(entry.path().extension())) == ".mp3")) wavs.push_back(entry.path());
     };
     report(context, "Finding WAV/transcript pairs");
     if (recursive) for (const auto& entry : fs::recursive_directory_iterator(plan.inputRoot)) consider(entry);
@@ -438,7 +439,7 @@ BatchPlan planBatch(const fs::path& input, const fs::path& output, bool recursiv
             if (!contained(plan.inputRoot, transcript) || !contained(plan.outputRoot, destination))
                 throw std::runtime_error("A linked path leaves the selected folder: " + displayPath(audio));
             // Quarantine every contender. Never silently let the first one win.
-            destinations[lower(destination.u8string())].push_back({audio, transcript, destination});
+            destinations[lower(neoshared::pathToUtf8(destination))].push_back({audio, transcript, destination});
         } catch (const std::exception& error) { plan.problems.push_back(error.what()); }
     }
     for (auto& entry : destinations) {
@@ -464,7 +465,7 @@ BatchResult Engine::batch(const BatchPlan& plan, MouthMovement movement, bool re
     // Even callers supplying their own plan cannot race two workers into the same file.
     std::set<std::string> targets;
     for(const auto& pair : plan.pairs)
-        if(!targets.insert(lower(normalized(pair.output).u8string())).second)
+        if(!targets.insert(lower(neoshared::pathToUtf8(normalized(pair.output)))).second)
             throw std::runtime_error("The batch plan contains conflicting output paths.");
     result.items.resize(plan.pairs.size());
     std::atomic<std::size_t> next{0};
@@ -650,7 +651,7 @@ ScanResult scanUnknownWords(const Assets& assets, const fs::path& folder, bool r
     const auto add = [&](const fs::directory_entry& entry) {
         context.work.check();
         if (!entry.is_symlink() && entry.is_regular_file()) {
-            const auto ext = lower(entry.path().extension().u8string());
+            const auto ext = lower(neoshared::pathToUtf8(entry.path().extension()));
             if (ext == ".txt" || ext == ".lab") files.push_back(entry.path());
         }
     };
@@ -679,7 +680,7 @@ void exportUnknownWords(const fs::path& path, const ScanResult& result) {
     output.commit(true);
 }
 void saveEditedLip(const fs::path& path, const std::vector<cslu::KotorKeyframe>& frames, double durationSeconds, bool replace) {
-    if (lower(path.extension().u8string()) != ".lip") throw std::runtime_error("Choose a .lip filename.");
+    if (lower(neoshared::pathToUtf8(path.extension())) != ".lip") throw std::runtime_error("Choose a .lip filename.");
     AtomicOutput output(path);
     cslu::writeKotorKeyframes(output.temporary, frames, durationSeconds);
     (void)validateWritten(output.temporary);

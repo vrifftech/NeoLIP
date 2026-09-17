@@ -1,4 +1,5 @@
 #include "audio.hpp"
+#include <neoshared/PathUtf8.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -12,7 +13,7 @@ unsigned u16(const unsigned char* p) { return unsigned(p[0]) | (unsigned(p[1])<<
 std::uint32_t u32(const unsigned char* p) { return std::uint32_t(p[0]) | (std::uint32_t(p[1])<<8) | (std::uint32_t(p[2])<<16) | (std::uint32_t(p[3])<<24); }
 std::vector<unsigned char> read(const std::filesystem::path& path) {
     std::ifstream f(path,std::ios::binary|std::ios::ate);
-    if(!f) throw std::runtime_error("Cannot open audio: " + path.u8string());
+    if(!f) throw std::runtime_error("Cannot open audio: " + neoshared::pathToUtf8(path));
     const auto n=f.tellg();
     if(n <= 0 || static_cast<std::uint64_t>(n)>maxBytes) throw std::runtime_error("Audio is empty or exceeds the 512 MiB input limit.");
     std::vector<unsigned char> bytes(static_cast<std::size_t>(n)); f.seekg(0);

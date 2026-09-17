@@ -7,6 +7,7 @@
 #include "NeoViewState.hpp"
 #include "NeoWxUi.hpp"
 #include "NeoGameDirectoryMenu.hpp"
+#include <neoshared/PathUtf8.hpp>
 #include <wx/wx.h>
 #include <wx/settings.h>
 #include <wx/notebook.h>
@@ -81,8 +82,8 @@ constexpr int ID_UndoLip = wxID_HIGHEST + 141;
 constexpr int ID_RedoLip = wxID_HIGHEST + 142;
 constexpr int ID_SetLipDuration = wxID_HIGHEST + 143;
 
-fs::path ToPath(const wxString& value) { return fs::u8path(wxui::toStd(value)); }
-wxString ToWx(const fs::path& value) { return wxui::toWx(value.u8string()); }
+fs::path ToPath(const wxString& value) { return neoshared::pathFromUtf8(wxui::toStd(value)); }
+wxString ToWx(const fs::path& value) { return wxui::toWx(neoshared::pathToUtf8(value)); }
 bool IsRegularFile(const wxString& path) { std::error_code ec; return !path.empty() && fs::is_regular_file(ToPath(path), ec); }
 void AddPickerRow(wxWindow* parent, wxFlexGridSizer* grid, const wxString& label, wxWindow* control) {
     grid->Add(new wxStaticText(parent, wxID_ANY, label), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
@@ -1018,7 +1019,7 @@ private:
             context.work.check();
             if (context.progress) context.progress({"Importing previous pronunciations", 0, 0});
             if (!fs::is_regular_file(path))
-                throw std::runtime_error("The previous custom dictionary is missing. Its saved location has been retained: " + path.u8string());
+                throw std::runtime_error("The previous custom dictionary is missing. Its saved location has been retained: " + neoshared::pathToUtf8(path));
             const auto assets = neolip::discoverAssets(executable, userData);
             neolip::requireAssets(assets);
             const auto same = [&](const fs::path& other) {
@@ -1383,7 +1384,7 @@ private:
         outputLabel_->Wrap(std::max(350, GetClientSize().GetWidth() - 70)); Layout();
     }
     std::optional<fs::path> ChooseLipOutput(const std::string& title, const fs::path& suggested) {
-        const std::string filename = suggested.empty() ? "dialogue.lip" : suggested.filename().u8string();
+        const std::string filename = suggested.empty() ? "dialogue.lip" : neoshared::pathToUtf8(suggested.filename());
 #ifdef __EMSCRIPTEN__
         return wxui::chooseSaveFile(this, title, "LIP files (*.lip)|*.lip", filename);
 #else
@@ -1525,7 +1526,7 @@ private:
         for (const auto& item : dialoguePlan_->rows) {
             std::string label = item.line.label();
             if (!item.line.speaker.empty()) label += " / " + item.line.speaker;
-            if (!item.output.empty()) label += " / " + item.output.filename().u8string();
+            if (!item.output.empty()) label += " / " + neoshared::pathToUtf8(item.output.filename());
             const long row = batchList_->InsertItem(batchList_->GetItemCount(), wxui::toWx(label));
             batchList_->SetItem(row, 1, wxui::toWx(neolip::dialogueStateName(item.state) + ": " + item.detail));
             batchList_->SetItem(row, 2, wxui::toWx(item.spokenText));
@@ -1843,7 +1844,7 @@ private:
             std::set<std::string> unknown; std::string details;
             for (const auto& item : lastBatch_.items) {
                 unknown.insert(item.unknownWords.begin(), item.unknownWords.end());
-                if (item.status == neolip::Status::Failed) details += item.input.u8string() + ": " + item.message + "\n";
+                if (item.status == neolip::Status::Failed) details += neoshared::pathToUtf8(item.input) + ": " + item.message + "\n";
             }
             unknownWords_.assign(unknown.begin(), unknown.end());
             SetResult(lastBatch_.cancelled ? "Batch cancelled" : "Batch finished",
@@ -2089,7 +2090,7 @@ private:
     void ExportLastOutput() {
         if (lastOutput_.empty() || running_) return;
 #ifdef __EMSCRIPTEN__
-        if (fs::is_regular_file(lastOutput_)) wxui::publishBrowserFile(lastOutput_, lastOutput_.filename().u8string());
+        if (fs::is_regular_file(lastOutput_)) wxui::publishBrowserFile(lastOutput_, neoshared::pathToUtf8(lastOutput_.filename()));
         else ExportBatchZip();
 #else
         const auto directory = fs::is_directory(lastOutput_) ? lastOutput_ : lastOutput_.parent_path();
@@ -2298,7 +2299,7 @@ private:
             RefreshLipGrid(); RefreshTimelinePanel(); lastOutput_ = path;
             SetResult("Saved " + ToWx(path.filename())); showFolderButton_->Show(); Layout();
 #ifdef __EMSCRIPTEN__
-            wxui::publishBrowserFile(path, path.filename().u8string());
+            wxui::publishBrowserFile(path, neoshared::pathToUtf8(path.filename()));
 #endif
             return true;
         } catch (const std::exception& e) { ShowProblem(e.what()); return false; }

@@ -1,4 +1,5 @@
 #include "dialogue_batch.hpp"
+#include <neoshared/PathUtf8.hpp>
 #include "fingerprint.hpp"
 #include <neotlk/TlkLookup.hpp>
 #include <algorithm>
@@ -59,7 +60,7 @@ std::vector<fs::path> named(const fs::path& directory, const std::string& basena
     std::vector<fs::path> result; std::error_code ec;
     fs::directory_iterator it(directory, ec), end;
     for (; !ec && it != end; it.increment(ec)) {
-        if (lower(it->path().filename().u8string()) == basename && regular(it->path())) result.push_back(canonicalPath(it->path()));
+        if (lower(neoshared::pathToUtf8(it->path().filename())) == basename && regular(it->path())) result.push_back(canonicalPath(it->path()));
     }
     return result;
 }
@@ -88,11 +89,11 @@ FolderIndex indexFolder(const fs::path& root, const Context& context) {
         // links to backups, another installation or a directory cycle.
         if (entry.is_symlink()) { it.disable_recursion_pending(); continue; }
         if (!entry.is_regular_file()) continue;
-        const auto ext = lower(entry.path().extension().u8string());
+        const auto ext = lower(neoshared::pathToUtf8(entry.path().extension()));
         if (ext == ".wav" || ext == ".mp3") {
-            index.audio[lower(entry.path().stem().u8string())].paths.push_back(canonicalPath(entry.path()));
+            index.audio[lower(neoshared::pathToUtf8(entry.path().stem()))].paths.push_back(canonicalPath(entry.path()));
             ++index.recordings;
-        } else if (lower(entry.path().filename().u8string()) == "dialog.tlk") {
+        } else if (lower(neoshared::pathToUtf8(entry.path().filename())) == "dialog.tlk") {
             index.talkTables.push_back(canonicalPath(entry.path()));
         }
     }
@@ -103,7 +104,7 @@ FolderIndex indexFolder(const fs::path& root, const Context& context) {
 }
 fs::path uniqueTable(const std::vector<fs::path>& paths, const fs::path& root) {
     if (paths.size() > 1) throw std::runtime_error(
-        "More than one dialog.tlk in " + root.u8string() +
+        "More than one dialog.tlk in " + neoshared::pathToUtf8(root) +
         "; select the intended game folder or choose its talk table explicitly.");
     return paths.empty() ? fs::path{} : paths.front();
 }
@@ -171,7 +172,8 @@ void resolveAudio(DialogueRow& row, FolderIndex& index, const Context& context) 
 void state(DialogueRow& row, DialogueState value, const std::string& detail) { row.state = value; row.detail = detail; }
 } // namespace
 fs::path defaultDialogueOutput(const fs::path& dialogue) {
-    return dialogue.parent_path() / fs::u8path(dialogue.stem().u8string() + "_lips");
+    auto folder = dialogue.stem(); folder += "_lips";
+    return dialogue.parent_path() / folder;
 }
 std::string dialogueStateName(DialogueState state) {
     switch (state) {
@@ -246,7 +248,7 @@ void rebuildDialogueBatch(DialoguePlan& plan) {
                 row.audioCandidates.size() > 1 ? "Different recordings match " + requestedAudio(row) + "; choose the intended audio" : "No WAV/MP3 under the selected folder matches " + requestedAudio(row));
         } else if (!regular(row.audio) || !contains(batch.inputRoot, row.audio) || fs::is_symlink(row.audio)) {
             state(row, DialogueState::MissingAudio, "Choose a regular audio file inside the selected search folder");
-        } else if (lower(row.audio.extension().u8string()) != ".wav" && lower(row.audio.extension().u8string()) != ".mp3") {
+        } else if (lower(neoshared::pathToUtf8(row.audio.extension())) != ".wav" && lower(neoshared::pathToUtf8(row.audio.extension())) != ".mp3") {
             state(row, DialogueState::MissingAudio, "Choose a WAV or MP3 recording");
         } else if (!contains(batch.outputRoot, row.output)) {
             state(row, DialogueState::Conflict, "Output path leaves the selected folder");
@@ -263,7 +265,7 @@ void rebuildDialogueBatch(DialoguePlan& plan) {
         }
         // Include unresolved rows in output-conflict checks: a ready row cannot
         // silently win over a second node that claims the same output resource.
-        groups[lower(row.output.u8string())].push_back(i);
+        groups[lower(neoshared::pathToUtf8(row.output))].push_back(i);
     }
     for (const auto& group : groups) {
         const auto& ids = group.second; auto& first = plan.rows[ids.front()];
@@ -275,7 +277,7 @@ void rebuildDialogueBatch(DialoguePlan& plan) {
         if (ids.size() > 1 && !same) {
             for (auto id : ids) state(plan.rows[id], DialogueState::Conflict,
                 "Nodes share this LIP name but differ or are unresolved; exclude the unintended contenders");
-            batch.problems.push_back("Conflicting dialogue destination: " + first.output.filename().u8string());
+            batch.problems.push_back("Conflicting dialogue destination: " + neoshared::pathToUtf8(first.output.filename()));
             continue;
         }
         if (first.state != DialogueState::Ready) continue;

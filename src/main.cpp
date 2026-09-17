@@ -2,6 +2,7 @@
 // executable; both frontends call the same typed engine rather than one another.
 #include "engine.hpp"
 #include "dialogue_batch.hpp"
+#include <neoshared/PathUtf8.hpp>
 #include <atomic>
 #include <csignal>
 #include <iostream>
@@ -48,7 +49,7 @@ static int commandMain(int argc, char** argv) {
         std::vector<std::string> positional;
         for (int i = 2; i < argc; ++i) {
             std::string arg = argv[i];
-            const auto value = [&]() { if (++i >= argc) throw std::runtime_error(arg + " requires a value"); return fs::u8path(argv[i]); };
+            const auto value = [&]() { if (++i >= argc) throw std::runtime_error(arg + " requires a value"); return neoshared::pathFromUtf8(argv[i]); };
             if (arg == "--models") assets.models = value();
             else if (arg == "--dictionaries") assets.dictionaries = value();
             else if (arg == "--user-dictionary") assets.userDictionary = value();
@@ -75,14 +76,14 @@ static int commandMain(int argc, char** argv) {
         context.work.yield = [&]() { if (interrupted) cancel.store(true); };
         if (command == "dialogue" && positional.size() == 3) {
             if (channel != -1 || recursive) throw std::runtime_error("Dialogue search is recursive; resolve per-line channel choices in the GUI.");
-            const auto plan = neolip::planDialogue({fs::u8path(positional[0]), fs::u8path(positional[1]), talkTable, fs::u8path(positional[2])}, context);
-            std::cout << "Search folder: " << plan.request.audioRoot.u8string() << '\n'
+            const auto plan = neolip::planDialogue({neoshared::pathFromUtf8(positional[0]), neoshared::pathFromUtf8(positional[1]), talkTable, neoshared::pathFromUtf8(positional[2])}, context);
+            std::cout << "Search folder: " << neoshared::pathToUtf8(plan.request.audioRoot) << '\n'
                       << "Recordings indexed: " << plan.recordingsIndexed << '\n';
-            if (!plan.request.talkTable.empty()) std::cout << "Talk table: " << plan.request.talkTable.u8string() << '\n';
+            if (!plan.request.talkTable.empty()) std::cout << "Talk table: " << neoshared::pathToUtf8(plan.request.talkTable) << '\n';
             std::size_t unresolved = 0;
             for (const auto& row : plan.rows) {
                 std::cout << row.line.label() << ": " << neolip::dialogueStateName(row.state) << " - " << row.detail << '\n';
-                if (!row.audio.empty()) std::cout << "  Recording: " << row.audio.lexically_relative(plan.request.audioRoot).u8string() << '\n';
+                if (!row.audio.empty()) std::cout << "  Recording: " << neoshared::pathToUtf8(row.audio.lexically_relative(plan.request.audioRoot)) << '\n';
                 if (row.state != neolip::DialogueState::Ready && row.state != neolip::DialogueState::Duplicate && row.state != neolip::DialogueState::NoVoice && row.state != neolip::DialogueState::Excluded) ++unresolved;
             }
             if (scanOnly) return unresolved ? 1 : 0;
@@ -95,13 +96,13 @@ static int commandMain(int argc, char** argv) {
         neolip::requireAssets(assets);
         neolip::Engine engine(assets);
         if (command == "create" && positional.size() == 3) {
-            auto result = engine.create({fs::u8path(positional[0]), neolip::readTranscript(fs::u8path(positional[1])),
-                fs::u8path(positional[2]), movement, replace, channel}, context);
+            auto result = engine.create({neoshared::pathFromUtf8(positional[0]), neolip::readTranscript(neoshared::pathFromUtf8(positional[1])),
+                neoshared::pathFromUtf8(positional[2]), movement, replace, channel}, context);
             print(result); return result.status == neolip::Status::Created ? 0 : 1;
         }
         if (command == "batch" && positional.size() == 2) {
             if (channel != -1) throw std::runtime_error("Use --channel with single-file creation; batch flags unusual channel layouts for individual review.");
-            const auto plan = neolip::planBatch(fs::u8path(positional[0]), fs::u8path(positional[1]), recursive, context);
+            const auto plan = neolip::planBatch(neoshared::pathFromUtf8(positional[0]), neoshared::pathFromUtf8(positional[1]), recursive, context);
             if (plan.pairs.empty()) throw std::runtime_error("No matching audio/transcript pairs.");
             for (const auto& problem : plan.problems) std::cerr << "Excluded: " << problem << '\n';
             const auto result = engine.batch(plan, movement, replace, context, print);

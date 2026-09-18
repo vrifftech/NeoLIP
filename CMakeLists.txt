@@ -26,6 +26,7 @@ include(GNUInstallDirs)
 
 message(STATUS "Using neoshared: ${NEOSHARED_ROOT}")
 include("${NEOSHARED_ROOT}/cmake/NeoMinimalRelease.cmake")
+include("${NEOSHARED_ROOT}/cmake/NeoVersion.cmake")
 include("${NEOSHARED_ROOT}/cmake/NeoMacOSBundle.cmake")
 include("${NEOSHARED_ROOT}/cmake/NeoWasm.cmake")
 if(NOT TARGET neoshared::wx)
@@ -125,6 +126,12 @@ neolip_force_static_msvc_runtime(neolip_engine)
 neo_apply_minimal_release(neolip_engine)
 if(NEOLIP_BUILD_CLI)
     add_executable(neolip_cli src/main.cpp)
+    neo_add_windows_version_resource(neolip_cli
+        VERSION "${PROJECT_VERSION}"
+        PRODUCT_NAME "NeoLIP"
+        FILE_DESCRIPTION "NeoLIP command-line lip-sync tool"
+        INTERNAL_NAME "neolip_cli"
+        ORIGINAL_FILENAME "neolip_cli.exe")
     target_link_libraries(neolip_cli PRIVATE neolip_engine)
     target_compile_definitions(neolip_cli PRIVATE ${NEOLIP_COMMON_DEFINITIONS})
     neolip_force_static_msvc_runtime(neolip_cli)
@@ -305,9 +312,6 @@ if(NEOLIP_BUILD_WX_GUI)
 
     if(NEOLIP_GUI_WX_FOUND)
         set(NEOLIP_WX_SOURCES src/gui/wx_main.cpp)
-        if(WIN32)
-            list(APPEND NEOLIP_WX_SOURCES resources/neolip.rc)
-        endif()
 
         if(WIN32)
             add_executable(NeoLIP WIN32 ${NEOLIP_WX_SOURCES})
@@ -316,6 +320,13 @@ if(NEOLIP_BUILD_WX_GUI)
         else()
             add_executable(NeoLIP ${NEOLIP_WX_SOURCES})
         endif()
+        neo_add_windows_version_resource(NeoLIP
+            VERSION "${PROJECT_VERSION}"
+            PRODUCT_NAME "NeoLIP"
+            FILE_DESCRIPTION "NeoLIP lip-sync editor"
+            INTERNAL_NAME "NeoLIP"
+            ORIGINAL_FILENAME "NeoLIP.exe"
+            ICON "${CMAKE_CURRENT_SOURCE_DIR}/resources/neolip.ico")
         neo_configure_macos_bundle(NeoLIP
             NAME "NeoLIP"
             IDENTIFIER "com.vrifftech.neolip"

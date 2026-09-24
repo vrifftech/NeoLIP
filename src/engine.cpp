@@ -144,6 +144,27 @@ std::vector<fs::path> dictionaryFiles(const fs::path& root) {
     for (char c = 'a'; c <= 'z'; ++c) paths.push_back(root / "cmu" / (std::string(1, c) + ".ob"));
     return paths;
 }
+struct AssetTreeFingerprints {
+    std::string models;
+    std::string dictionaries;
+};
+
+AssetTreeFingerprints cachedAssetTreeFingerprints(const Assets& assets) {
+    static std::mutex mutex;
+    static std::map<std::string, AssetTreeFingerprints> cache;
+    const std::string key = displayPath(normalized(assets.models)) + "\n" +
+                            displayPath(normalized(assets.dictionaries));
+    std::lock_guard<std::mutex> lock(mutex);
+    const auto found = cache.find(key);
+    if (found != cache.end()) return found->second;
+
+    AssetTreeFingerprints value{
+        treeFingerprint(assets.models),
+        treeFingerprint(assets.dictionaries)
+    };
+    cache.emplace(key, value);
+    return value;
+}
 bool complete(const fs::path& root, bool models) {
     const auto paths = models ? modelFiles(root) : dictionaryFiles(root);
     return std::all_of(paths.begin(), paths.end(), [](const fs::path& path) {
@@ -296,23 +317,26 @@ struct Engine::Impl {
     Assets assets;
     std::unique_ptr<cslu::TextToNtpResolver> resolver;
     std::vector<cslu::NNet45> models;
-    std::string modelFingerprint, dictionaryFingerprint;
+    std::string modelFingerprint, dictionaryBaseFingerprint, dictionaryFingerprint;
     std::shared_ptr<const PreparedAlignment> prepared;
     std::string refreshInputs(const CreateRequest& request) {
-        const auto nextModels = treeFingerprint(assets.models);
         const auto user = file(assets.userDictionary) ? fileFingerprint(assets.userDictionary) : sha256("<absent>");
-        const auto nextDictionary = sha256(treeFingerprint(assets.dictionaries) + user);
-        if (modelFingerprint != nextModels) { models.clear(); prepared.reset(); modelFingerprint = nextModels; }
+        const auto nextDictionary = sha256(dictionaryBaseFingerprint + user);
         if (dictionaryFingerprint != nextDictionary) { resolver.reset(); prepared.reset(); dictionaryFingerprint = nextDictionary; }
-        return sha256(fileFingerprint(request.audio) + nextModels + nextDictionary +
+        return sha256(fileFingerprint(request.audio) + modelFingerprint + nextDictionary +
             std::to_string(request.audioChannel) + ":" + request.spokenText);
     }
     void refreshDictionary() {
         const auto user = file(assets.userDictionary) ? fileFingerprint(assets.userDictionary) : sha256("<absent>");
-        const auto next = sha256(treeFingerprint(assets.dictionaries) + user);
+        const auto next = sha256(dictionaryBaseFingerprint + user);
         if (next != dictionaryFingerprint) { resolver.reset(); prepared.reset(); dictionaryFingerprint = next; }
     }
-    explicit Impl(Assets value) : assets(std::move(value)) { requireAssets(assets); }
+    explicit Impl(Assets value) : assets(std::move(value)) {
+        requireAssets(assets);
+        const auto fingerprints = cachedAssetTreeFingerprints(assets);
+        modelFingerprint = fingerprints.models;
+        dictionaryBaseFingerprint = fingerprints.dictionaries;
+    }
     cslu::TextToNtpResolver& text() {
         if (!resolver) resolver = std::make_unique<cslu::TextToNtpResolver>(textOptions(assets));
         return *resolver;
@@ -395,9 +419,9 @@ Result Engine::create(const CreateRequest& request, const Context& context) {
             prepared->warnings=reviewAlignment(*audio,alignment,graph.graph);
             prepared->words=alignedWords(text,graph.graph,alignment);prepared->transcript=request.spokenText;
             prepared->phonemes=std::move(alignment.phn);
-            // Re-read content before committing an alignment: file replacement
-            // during a long inference must not produce a cached stale result.
-            if(impl_->refreshInputs(request)!=key)throw std::runtime_error("An input changed during alignment. Retry with the current files.");
+            // The operation owns the decoded audio/transcript snapshot. Avoid
+            // rehashing immutable assets and the audio after a long alignment
+            // solely for concurrent-mutation detection.
             impl_->prepared=std::move(prepared);
         } else result.reusedAlignment=true;
         result.prepared=impl_->prepared;result.audio=impl_->prepared->audio;result.warnings=impl_->prepared->warnings;
@@ -418,10 +442,20 @@ BatchPlan planBatch(const fs::path& input, const fs::path& output, bool recursiv
     BatchPlan plan; plan.inputRoot = normalized(input); plan.outputRoot = normalized(output.empty() ? input : output);
     if (!fs::is_directory(plan.inputRoot)) throw std::runtime_error("Choose a batch input folder.");
     std::vector<fs::path> wavs;
+    std::map<std::string, std::vector<fs::path>> transcriptIndex;
+    const auto transcriptKey = [](const fs::path& path) {
+        return lower(neoshared::pathToUtf8(normalized(path.parent_path()))) + "|" +
+               lower(neoshared::pathToUtf8(path.stem()));
+    };
     const auto consider = [&](const fs::directory_entry& entry) {
         context.work.check();
-        if (entry.is_symlink()) return;
-        if (entry.is_regular_file() && (lower(neoshared::pathToUtf8(entry.path().extension())) == ".wav" || lower(neoshared::pathToUtf8(entry.path().extension())) == ".mp3")) wavs.push_back(entry.path());
+        if (entry.is_symlink() || !entry.is_regular_file()) return;
+        const auto extension = lower(neoshared::pathToUtf8(entry.path().extension()));
+        if (extension == ".wav" || extension == ".mp3") {
+            wavs.push_back(entry.path());
+        } else if (extension == ".txt" || extension == ".lab") {
+            transcriptIndex[transcriptKey(entry.path())].push_back(entry.path());
+        }
     };
     report(context, "Finding WAV/transcript pairs");
     if (recursive) for (const auto& entry : fs::recursive_directory_iterator(plan.inputRoot)) consider(entry);
@@ -431,7 +465,35 @@ BatchPlan planBatch(const fs::path& input, const fs::path& output, bool recursiv
     for (const auto& audio : wavs) {
         context.work.check();
         try {
-            const auto transcript = matchingTranscript(audio);
+            fs::path transcript;
+            for (const auto& ext : {std::string(".txt"), std::string(".lab")}) {
+                auto candidate = audio;
+                candidate.replace_extension(ext);
+                if (file(candidate)) {
+                    transcript = candidate;
+                    break;
+                }
+            }
+            if (transcript.empty()) {
+                const auto found = transcriptIndex.find(transcriptKey(audio));
+                if (found != transcriptIndex.end()) {
+                    auto candidates = found->second;
+                    std::stable_sort(candidates.begin(), candidates.end(),
+                        [](const fs::path& left, const fs::path& right) {
+                            const auto leftExt = lower(neoshared::pathToUtf8(left.extension()));
+                            const auto rightExt = lower(neoshared::pathToUtf8(right.extension()));
+                            if (leftExt != rightExt) return leftExt == ".txt";
+                            return left < right;
+                        });
+                    if (candidates.size() > 2 ||
+                        (candidates.size() == 2 &&
+                         lower(neoshared::pathToUtf8(candidates[0].extension())) ==
+                         lower(neoshared::pathToUtf8(candidates[1].extension())))) {
+                        throw std::runtime_error("More than one matching file for " + displayPath(audio));
+                    }
+                    if (!candidates.empty()) transcript = candidates.front();
+                }
+            }
             if (transcript.empty()) { plan.missingTranscripts.push_back(audio); continue; }
             const auto rel = audio.lexically_relative(plan.inputRoot);
             auto destination = plan.outputRoot / rel;

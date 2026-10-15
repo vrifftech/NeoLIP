@@ -1,5 +1,6 @@
 #pragma once
 #include "audio.hpp"
+#include <neoshared/audio/Playback.hpp>
 #include <memory>
 #include <mutex>
 namespace neolip {
@@ -14,11 +15,7 @@ public:
     bool playing() const; double position() const;
     std::size_t render(float* output,std::size_t frames);
 private:
-    mutable std::mutex mutex_;
-    std::shared_ptr<const AudioBuffer> audio_;
-    std::size_t cursor_=0,loopBegin_=0,loopEnd_=0;
-    bool playing_=false,loop_=false;
-    float gain_=1.f;
+    neoshared::audio::PcmTransport transport_;
 };
 class AudioPlayback {
 public:

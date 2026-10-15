@@ -39,7 +39,7 @@ set(NEOLIP_APP_PHASE_STRING "0")
 
 option(NEOLIP_BUILD_WX_GUI "Build the NeoLIP wxWidgets desktop application" ON)
 option(NEOLIP_REQUIRE_WX_GUI "Fail configure if wxWidgets is unavailable while NEOLIP_BUILD_WX_GUI is ON" ON)
-option(NEOLIP_BUILD_CLI "Build the optional command-line automation frontend (not packaged)" OFF)
+option(NEOLIP_BUILD_CLI "Build and install the optional command-line automation frontend" OFF)
 
 # Backward-compatible aliases for older build scripts.
 if(DEFINED CSLU_BUILD_WX_GUI)
@@ -93,7 +93,7 @@ set(NEOLIP_COMMON_DEFINITIONS
 
 add_library(neolip_core STATIC ${NEOLIP_CORE_SOURCES})
 target_include_directories(neolip_core PUBLIC src)
-target_link_libraries(neolip_core PUBLIC neolip_audio_codec neoshared::path)
+target_link_libraries(neolip_core PUBLIC neoshared::audio neoshared::path neoshared::lip)
 target_compile_features(neolip_core PUBLIC cxx_std_17)
 if(MSVC)
     target_compile_options(neolip_core PRIVATE /W4 /permissive- /Zc:__cplusplus)
@@ -110,7 +110,7 @@ add_library(neolip_playback STATIC src/playback_device.cpp)
 target_link_libraries(neolip_playback PUBLIC neolip_core)
 neolip_force_static_msvc_runtime(neolip_playback)
 target_include_directories(neolip_engine PUBLIC src)
-target_link_libraries(neolip_engine PUBLIC neolip_core neoshared::dlg neoshared::tlk)
+target_link_libraries(neolip_engine PUBLIC neolip_core neoshared::dlg neoshared::tlk neoshared::game)
 target_compile_features(neolip_engine PUBLIC cxx_std_17)
 if(NOT EMSCRIPTEN)
     find_package(Threads REQUIRED)
@@ -125,21 +125,20 @@ endif()
 neolip_force_static_msvc_runtime(neolip_engine)
 neo_apply_minimal_release(neolip_engine)
 if(NEOLIP_BUILD_CLI)
-    add_executable(neolip_cli src/main.cpp)
-    neo_add_windows_version_resource(neolip_cli
+    add_executable(neolip-cli src/main.cpp)
+    neo_add_windows_version_resource(neolip-cli
         VERSION "${PROJECT_VERSION}"
         PRODUCT_NAME "NeoLIP"
         FILE_DESCRIPTION "NeoLIP command-line lip-sync tool"
-        INTERNAL_NAME "neolip_cli"
-        ORIGINAL_FILENAME "neolip_cli.exe")
-    target_link_libraries(neolip_cli PRIVATE neolip_engine)
-    target_compile_definitions(neolip_cli PRIVATE ${NEOLIP_COMMON_DEFINITIONS})
-    neolip_force_static_msvc_runtime(neolip_cli)
+        INTERNAL_NAME "neolip-cli"
+        ORIGINAL_FILENAME "neolip-cli.exe")
+    target_link_libraries(neolip-cli PRIVATE neolip_engine)
+    target_compile_definitions(neolip-cli PRIVATE ${NEOLIP_COMMON_DEFINITIONS})
+    neolip_force_static_msvc_runtime(neolip-cli)
 endif()
 
 
-# Runtime assets are installed only when the desktop application target exists.
-# Core-only configurations must not produce an asset-only package.
+# Runtime assets are installed with either executable; core-only builds install no assets.
 set(NEOLIP_CSLU_RUNTIME_DIR "${CMAKE_CURRENT_LIST_DIR}/third_party/cslu_runtime")
 set(NEOLIP_CSLU_FA_DIR "${NEOLIP_CSLU_RUNTIME_DIR}/Toolkit/2.0/apps/fa")
 set(NEOLIP_CSLU_CMU_DIR "${NEOLIP_CSLU_RUNTIME_DIR}/Toolkit/2.0/script/dictionary_1.0/cmu")
@@ -390,14 +389,6 @@ if(NEOLIP_BUILD_WX_GUI)
         install(TARGETS NeoLIP
             BUNDLE DESTINATION .
             RUNTIME DESTINATION "${NEOLIP_RUNTIME_DESTINATION}")
-        if(APPLE)
-            set(NEOLIP_DATA_PREFIX "NeoLIP.app/Contents/Resources/")
-            set(NEOLIP_DATA_ROOT "NeoLIP.app/Contents/Resources")
-        else()
-            set(NEOLIP_DATA_PREFIX "")
-            set(NEOLIP_DATA_ROOT ".")
-        endif()
-
         if(UNIX AND NOT APPLE)
             foreach(NEOLIP_ICON_SIZE 16 24 32 48 64 128 256 512)
                 install(FILES resources/icons/${NEOLIP_ICON_SIZE}x${NEOLIP_ICON_SIZE}/neolip.png
@@ -411,19 +402,6 @@ if(NEOLIP_BUILD_WX_GUI)
                 DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications)
         endif()
 
-        install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/licenses/miniaudio.txt"
-            DESTINATION "${NEOLIP_DATA_PREFIX}licenses")
-        install(DIRECTORY "${NEOLIP_BUNDLED_DICTIONARY_ROOT}/"
-            DESTINATION "${NEOLIP_DATA_PREFIX}dictionaries")
-        install(FILES
-            "${NEOLIP_CSLU_FA_DIR}/phonemes_new_16k.train.spec"
-            "${NEOLIP_CSLU_FA_DIR}/phonemes_new_16k.parts"
-            DESTINATION "${NEOLIP_DATA_PREFIX}models")
-        install(DIRECTORY
-            "${NEOLIP_CSLU_FA_DIR}/bc_16k"
-            "${NEOLIP_CSLU_FA_DIR}/trans_16k"
-            DESTINATION "${NEOLIP_DATA_PREFIX}models")
-
     elseif(NEOLIP_REQUIRE_WX_GUI)
         message(FATAL_ERROR "wxWidgets was not found, but NEOLIP_REQUIRE_WX_GUI is ON. On Windows, use the pinned wxWidgets 3.3.3 overlay from neoshared; on Debian or Ubuntu, install libwxgtk3.2-dev")
     else()
@@ -431,16 +409,44 @@ if(NEOLIP_BUILD_WX_GUI)
     endif()
 endif()
 
+if(TARGET neolip-cli)
+    if(APPLE AND TARGET NeoLIP)
+        install(TARGETS neolip-cli RUNTIME DESTINATION "NeoLIP.app/Contents/MacOS")
+    else()
+        install(TARGETS neolip-cli RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    endif()
+endif()
+
+if(TARGET NeoLIP OR TARGET neolip-cli)
+    if(APPLE AND TARGET NeoLIP)
+        set(NEOLIP_DATA_PREFIX "NeoLIP.app/Contents/Resources/")
+    else()
+        set(NEOLIP_DATA_PREFIX "")
+    endif()
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/licenses/miniaudio.txt"
+        DESTINATION "${NEOLIP_DATA_PREFIX}licenses")
+    install(DIRECTORY "${NEOLIP_BUNDLED_DICTIONARY_ROOT}/"
+        DESTINATION "${NEOLIP_DATA_PREFIX}dictionaries")
+    install(FILES
+        "${NEOLIP_CSLU_FA_DIR}/phonemes_new_16k.train.spec"
+        "${NEOLIP_CSLU_FA_DIR}/phonemes_new_16k.parts"
+        DESTINATION "${NEOLIP_DATA_PREFIX}models")
+    install(DIRECTORY
+        "${NEOLIP_CSLU_FA_DIR}/bc_16k"
+        "${NEOLIP_CSLU_FA_DIR}/trans_16k"
+        DESTINATION "${NEOLIP_DATA_PREFIX}models")
+endif()
+
 set(CPACK_PACKAGE_NAME "NeoLIP")
 set(CPACK_PACKAGE_VENDOR "Unofficial fan project")
 set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "NeoLIP: GUI for CSLU-compatible KOTOR LIP generation")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "NeoLIP: CSLU-compatible KOTOR LIP generation")
 set(CPACK_PACKAGE_FILE_NAME "NeoLIP-${PROJECT_VERSION}-${CMAKE_SYSTEM_NAME}")
 set(CPACK_GENERATOR "ZIP")
-if(TARGET NeoLIP)
+if(TARGET NeoLIP OR TARGET neolip-cli)
     include(CPack)
 else()
-    message(STATUS "NeoLIP package generation is disabled because the desktop application target was not built")
+    message(STATUS "NeoLIP package generation is disabled because no executable target was built")
 endif()
 
 

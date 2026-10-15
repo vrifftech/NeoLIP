@@ -1,5 +1,6 @@
 #pragma once
 #include "wav.hpp"
+#include <neoshared/audio/Audio.hpp>
 #include "work_control.hpp"
 #include <memory>
 #include <vector>
@@ -22,14 +23,11 @@ struct AudioBuffer {
 // Both creation and the editor use this decoder. No trimming or gain changes.
 std::shared_ptr<const AudioBuffer> decodeAudio(const std::filesystem::path& path,
                                              int channel = -1);
-struct InterleavedAudio {
-    unsigned sampleRate = 0, channels = 0;
-    std::vector<float> samples;
-};
+using InterleavedAudio = neoshared::audio::PcmData;
 // The compressed-codec boundary is implemented by the pinned built-in codec,
 // not a subprocess. PCM/float WAVE is handled by the same strict native parser.
 InterleavedAudio decodeCompressedAudio(const unsigned char* bytes, std::size_t size);
-std::shared_ptr<const AudioBuffer> analyseAudio(InterleavedAudio audio, int channel = -1);
+std::shared_ptr<const AudioBuffer> analyseAudio(const InterleavedAudio& audio, int channel = -1);
 class WaveformPeaks {
 public:
     explicit WaveformPeaks(std::shared_ptr<const AudioBuffer> audio = {});

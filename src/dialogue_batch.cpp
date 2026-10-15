@@ -1,5 +1,6 @@
 #include "dialogue_batch.hpp"
 #include <neoshared/PathUtf8.hpp>
+#include <neoshared/game/Installation.hpp>
 #include "fingerprint.hpp"
 #include <neotlk/TlkLookup.hpp>
 #include <algorithm>
@@ -108,7 +109,27 @@ fs::path uniqueTable(const std::vector<fs::path>& paths, const fs::path& root) {
         "; select the intended game folder or choose its talk table explicitly.");
     return paths.empty() ? fs::path{} : paths.front();
 }
+std::optional<fs::path> installationTalkTable(const fs::path& source) {
+    fs::path current = neoshared::game::normalizeConfiguredPath(source);
+    if (!neoshared::game::isDirectoryPath(current)) current = current.parent_path();
+    while (!current.empty()) {
+        if (const auto install = neoshared::game::inspectGameInstallation(
+                current, std::nullopt, "NeoLIP selected folder")) {
+            if (neoshared::game::isRegularFilePath(install->tlkPath)) return install->tlkPath;
+        }
+        const auto parent = current.parent_path();
+        if (parent.empty() || parent == current) break;
+        current = parent;
+    }
+    return std::nullopt;
+}
+
 fs::path findTlk(const DialogueRequest& request, const FolderIndex& index) {
+    // Prefer a validated installation table. This handles game roots, voice
+    // subfolders, macOS bundles, and Linux paths containing spaces without
+    // shell parsing or directory-name guesses.
+    if (const auto table = installationTalkTable(request.audioRoot)) return *table;
+    if (const auto table = installationTalkTable(request.dialogue)) return *table;
     // A root-level installation table beats any nested backup. A single nested
     // table also works when the user selects a containing folder or macOS bundle.
     std::vector<fs::path> direct;
@@ -116,15 +137,9 @@ fs::path findTlk(const DialogueRequest& request, const FolderIndex& index) {
         if (table.parent_path() == request.audioRoot) direct.push_back(table);
     if (!direct.empty()) return uniqueTable(direct, request.audioRoot);
     if (!index.talkTables.empty()) return uniqueTable(index.talkTables, request.audioRoot);
-    // Voice subfolders can use their installation's table. Do not expand the
-    // AUDIO search into parents: selecting a mod folder must not mix other mods.
-    auto dir = request.audioRoot.parent_path();
-    while (!dir.empty()) {
-        cslu::checkWork();
-        const auto matches = named(dir, "dialog.tlk");
-        if (!matches.empty()) return uniqueTable(matches, dir);
-        const auto parent = dir.parent_path(); if (parent == dir) break; dir = parent;
-    }
+    // Only a validated installation may contribute a table from outside the
+    // explicitly selected audio tree. An arbitrary parent directory is not an
+    // installation merely because it contains a file named dialog.tlk.
     const auto directory = request.dialogue.parent_path();
     return uniqueTable(named(directory, "dialog.tlk"), directory);
 }

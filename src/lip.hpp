@@ -1,6 +1,7 @@
 #pragma once
 
 #include "phn.hpp"
+#include <neoshared/lip/LipFile.hpp>
 
 #include <cstdint>
 #include <cstddef>
@@ -10,15 +11,8 @@
 
 namespace cslu {
 
-struct LipKeyframe {
-    float timeSeconds = 0.0f;
-    std::uint8_t shape = 0;
-};
-
-struct LipFile {
-    float durationSeconds = 0.0f;
-    std::vector<LipKeyframe> frames;
-};
+using LipKeyframe = neoshared::lip::LipKeyframe;
+using LipFile = neoshared::lip::LipFile;
 
 // Editor view of ALL counted records, including the real key at time zero.
 // The header duration is stored separately and must not be inferred on save.

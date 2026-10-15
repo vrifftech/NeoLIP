@@ -29,7 +29,7 @@ Options:
   --build-type TYPE        Debug, Release, RelWithDebInfo, or MinSizeRel
   --wx ON|OFF              Build the wxWidgets GUI target when available
   --require-wx ON|OFF      Fail configure if wxWidgets is unavailable
-  --cli ON|OFF             Build optional automation CLI (not packaged) [OFF]
+  --cli ON|OFF             Build and install optional automation CLI [OFF]
   --minimal-release ON|OFF Enable release minimization flags
   --jobs N                 Parallel build jobs
   --target NAME            Build a specific CMake target

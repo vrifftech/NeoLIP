@@ -69,7 +69,6 @@ NeoLIP              desktop application
 neolip_backend      required private worker
 ```
 
-NeoLIP has no supported public command-line application. `neolip_backend` must remain beside the Windows executable, or in the same installed `bin` directory on Linux, so long-running jobs can be cancelled safely. Configuration now fails instead of silently producing an asset-only package when the GUI was requested but wxWidgets was not found.
 
 ## Use NeoLIP
 
@@ -101,33 +100,3 @@ The Windows package puts `NeoLIP.exe` at its top level. `neolip_backend.exe`, `m
 
 The source tree includes the runtime assets under `third_party/cslu_runtime`.
 
-## LIP V1.0 format
-
-NeoLIP uses one canonical reader and writer for KotOR `LIP V1.0` files:
-
-```text
-offset  size       value
-0x00    8          "LIP V1.0"
-0x08    4          duration as little-endian float32
-0x0C    4          total record count as little-endian uint32
-0x10    5 * count  records: float32 time followed by uint8 shape
-```
-
-The first record is explicitly stored as time `0.0`, shape `0`, and is included in the uint32 count. The editor hides that initial rest record while preserving it on disk. There is no 255-record limit.
-
-## Shared game directories
-
-The wxWidgets application exposes **File > Open Game Directory**. Its submenu lists every saved game install from the shared `neoshared` settings store; selecting an entry opens this application's supported-file dialog with that installation as the starting folder. **Manage Game Directories...** adds, renames, rescans, activates, or removes shared entries, and changes are visible in every Neo tool.
-
-## Continuous integration
-
-GitHub Actions checks out `vrifftech/NeoShared` beside this repository, then builds the full wxWidgets application on Ubuntu 24.04 and Windows Server 2025 with Visual Studio 2026. Successful non-pull-request runs publish one ready-to-run archive per platform:
-
-```text
-NeoLIP-linux-x86_64.tar.gz
-NeoLIP-windows-x64.zip
-```
-
-The workflows build, install, and package the application, backend, models, and dictionaries. The portable Linux archive keeps the real GUI and its private backend together under `libexec/neolip/`; `bin/NeoLIP` is a launcher that selects the bundled wxWidgets runtime.
-
-The shared dependency defaults to `NeoShared/main`. A manual workflow run or `neoshared-updated` repository-dispatch event can supply a branch, tag, or commit SHA. Each CI job verifies that both the GUI and its private backend are present before publishing an artifact.

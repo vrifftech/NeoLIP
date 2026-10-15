@@ -28,21 +28,6 @@
 namespace cslu {
 namespace {
 
-std::uint32_t readU32LE(const unsigned char* p) {
-    return static_cast<std::uint32_t>(p[0]) |
-           (static_cast<std::uint32_t>(p[1]) << 8U) |
-           (static_cast<std::uint32_t>(p[2]) << 16U) |
-           (static_cast<std::uint32_t>(p[3]) << 24U);
-}
-
-float readF32LE(const unsigned char* p) {
-    std::uint32_t u = readU32LE(p);
-    float f;
-    static_assert(sizeof(float) == 4, "float must be 32-bit");
-    std::memcpy(&f, &u, sizeof(f));
-    return f;
-}
-
 void writeU32LE(std::ostream& out, std::uint32_t v) {
     unsigned char b[4] = {
         static_cast<unsigned char>(v & 0xff),
@@ -436,31 +421,15 @@ LipFile readLip(const std::filesystem::path& path) {
     if (!in) throw std::runtime_error("cannot open LIP file: " + path.string());
     std::vector<unsigned char> data((std::istreambuf_iterator<char>(in)),
                                     std::istreambuf_iterator<char>());
-    if (data.size() < 16) throw std::runtime_error("LIP file too short: " + path.string());
-    if (std::memcmp(data.data(), "LIP V1.0", 8) != 0) {
-        throw std::runtime_error("invalid LIP signature: " + path.string());
-    }
-
-    LipFile lip;
-    lip.durationSeconds = readF32LE(data.data() + 8);
-    const std::uint32_t recordCount = readU32LE(data.data() + 12);
-    if (recordCount == 0) {
+    LipFile lip = neoshared::lip::readLip(data, path.string());
+    if (lip.frames.empty()) {
         throw std::runtime_error("LIP record count is zero: " + path.string());
     }
-    if (recordCount > (data.size() - 16U) / 5U) {
-        throw std::runtime_error("truncated LIP record table: " + path.string());
-    }
     const std::size_t expectedSize =
-        16U + 5U * static_cast<std::size_t>(recordCount);
+        16U + 5U * lip.frames.size();
     if (data.size() != expectedSize) {
         throw std::runtime_error(
             "LIP file size does not match its uint32 record count: " + path.string());
-    }
-
-    lip.frames.reserve(recordCount);
-    const unsigned char* record = data.data() + 16;
-    for (std::uint32_t i = 0; i < recordCount; ++i, record += 5) {
-        lip.frames.push_back({readF32LE(record), record[4]});
     }
     return lip;
 }

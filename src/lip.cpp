@@ -266,7 +266,7 @@ bool isRestOrPausePhone(const std::string& phoneIn) {
 }
 
 int anticipationMsForShape(std::uint8_t shape, const LipQualityOptions& post) {
-    // Nonzero values are opt-in authoring settings, not recovered game rules.
+    // Nonzero values are opt-in authoring settings, not game rules.
     switch (shape) {
         case 11: return std::max(0, post.anticipateClosuresMs);
         case 8: case 10: return std::max(0, post.anticipateFricativesMs);
@@ -627,7 +627,7 @@ LipFile phnToLip(const PhnFile& phn, LipTailRestOptions tailRest, LipQualityOpti
         if (!(arrivals[i] < current.end)) throw std::runtime_error("No time remains for a mouth pose target.");
     }
 
-    // These are authoring policies, not numeric constants recovered from the
+    // These are authoring policies, not numeric constants from the
     // game. Both presets preserve every distinct pose and both hold endpoints.
     // Natural blends over at most 40ms; Minimal over at most 10ms. A transition
     // never consumes more than half the time between neighboring arrivals.

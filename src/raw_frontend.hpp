@@ -56,12 +56,12 @@ Matrix computeBurstMx8k(const std::vector<double>& samples,
 Matrix computeBurstPulsesCol7(const Matrix& burstMx);
 
 
-// Phase 6: recovered prep.dll DC-removal path.
+// Phase 6: prep.dll DC-removal path.
 Pcm16Mono applyPrepDcrmIir(const Pcm16Mono& wav, double tauMs = 300.0);
 Matrix pcmSamplesColumn(const Pcm16Mono& wav);
 void writePcm16Mono(const Pcm16Mono& wav, const std::filesystem::path& path);
 
-// Phase 7: recovered feature.dll Bark/cepstral path for the CSLU FA setup.
+// Phase 7: feature.dll Bark/cepstral path for the CSLU FA setup.
 // The post-processing geometry/CMS/energy-replacement/delta plumbing follows
 // features_new_16k.tcl. The initial Bark cepstral extractor uses feature.dll's
 // default finite support [center-2.5, center+1.3] Bark filterbank.
@@ -98,8 +98,8 @@ PlpApproxFeatures computePlpApprox16k(const Pcm16Mono& wav16k,
 // wave_16k_before_dc.wav and wave_8k_before_dc.wav into
 // computeFullFrontendFromPreDcWavs(). computeFullFrontendFromOriginalWav()
 // includes a portable linear resampler as a temporary replacement for
-// wave.dll sampleconvert. Phase 13 replaces the temporary resampler with a
-// disassembly-guided implementation of Wave_sampleConvert's FIR/polyphase path.
+// wave.dll sampleconvert. Phase 13 implements Wave_sampleConvert's
+// FIR/polyphase path.
 struct FullFrontendFeatures {
     Pcm16Mono wave16BeforeDc;
     Pcm16Mono wave8BeforeDc;

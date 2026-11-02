@@ -90,7 +90,7 @@ struct LipPoseBlend {
     double fromTalkPosition = 1.0 / 16.0, toTalkPosition = 1.0 / 16.0;
     bool completed = false;
 };
-// Recovered KotOR interior interpolation. Endpoint display is clamped; the
+// KotOR interior interpolation. Endpoint display is clamped; the
 // engine's separate blend-out is not a new rest key. Duplicate timestamps use
 // the last key at that instant (a defensive preview policy, not a claim about
 // malformed-input playback in the game). Rejects descending/non-finite curves.

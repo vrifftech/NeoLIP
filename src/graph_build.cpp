@@ -1203,14 +1203,14 @@ std::string applyFaNtpSubstitutions(const std::string& ntpText) {
     ntp = regexReplaceAll(ntp, "n_\\(", "n_\\(");
     ntp = regexReplaceAll(ntp, ">i", "(oI_o oI_I)");
     ntp = regexReplaceAll(ntp, "(^|[^A-Za-z0-9_])oI([^A-Za-z0-9_]|$)", "$1(oI_o oI_I)$2");
-    ntp = regexReplaceAll(ntp, "([^\\*\\+0-9\\-])>", "$1\\>");
+    ntp = regexReplaceAll(ntp, "(^|[^\\*\\+0-9\\-])>", "$1\\>");
     ntp = regexReplaceAll(ntp, "aI", "(aI_a aI_I)");
     ntp = regexReplaceAll(ntp, "iU", "(iU_i iU_U)");
     ntp = regexReplaceAll(ntp, "aU", "(aU_a aU_U)");
     ntp = regexReplaceAll(ntp, "ei", "(ei_e ei_i)");
     ntp = regexReplaceAll(ntp, "oU", "(oU_o oU_U)");
-    ntp = regexReplaceAll(ntp, "tS([^c])", "(tS_t tS_S)$1");
-    ntp = regexReplaceAll(ntp, "dZ([^c])", "(dZ_d dZ_Z)$1");
+    ntp = regexReplaceAll(ntp, "tS([^c]|$)", "(tS_t tS_S)$1");
+    ntp = regexReplaceAll(ntp, "dZ([^c]|$)", "(dZ_d dZ_Z)$1");
     return ntp;
 }
 

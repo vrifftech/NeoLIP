@@ -322,7 +322,7 @@ constexpr int kBurstGroupSamples = kBurstFrameSamples / kBurstSamplesPerMs;
 constexpr int kBurstLargeWinSamples = 176; // 22 ms
 constexpr int kBurstSmallWinSamples = 192; // 24 ms
 constexpr int kBurstDeltaFrames = 14; // 14 ms at the internal 1 ms step
-constexpr int kBurstEffectiveShiftFrames = 12; // recovered burst.dll post-compute delay: large_win/2 in 1 ms units + 1
+constexpr int kBurstEffectiveShiftFrames = 12; // burst.dll post-compute delay: large_win/2 in 1 ms units + 1
 constexpr double kBurstPulseThreshold = 0.075;
 
 std::vector<double> computeDeltaCslu(const std::vector<double>& input, int deltaFrames) {
@@ -938,7 +938,7 @@ Pcm16Mono applyPrepDcrmIir(const Pcm16Mono& wav, double tauMs) {
     if (wav.sampleRate == 0 || tauMs <= 0.0) {
         throw std::runtime_error("applyPrepDcrmIir requires positive sample rate and tau");
     }
-    // prep.dll dcrmInit/dcrm disassembly: a = pow(0.5, 0.001 * rate / tau).
+    // DC-removal coefficient: a = pow(0.5, 0.001 * rate / tau).
     // Tcl calls `prep !dc initialize -tau 300 -rate <samplerate>` in the FA path.
     const float a = static_cast<float>(std::pow(0.5, 0.001 * static_cast<double>(wav.sampleRate) / tauMs));
     const float oneMinusA = static_cast<float>(1.0f - a);
@@ -1028,7 +1028,7 @@ Matrix computeApproxFeatureInit16k(const std::vector<double>& samples,
     if (frameMs <= 0.0 || winMs <= 0.0 || filters < 3 || outputs < 1) {
         throw std::runtime_error("invalid PLP arguments");
     }
-    // Recovered from feature.dll's forced-alignment path:
+    // Forced-alignment processing path:
     //   DOPREEMPHASIS -> DOHAMMING -> DOPOWERSPEC -> DOFBANKBARK ->
     //   DOLOGSPEC -> DOINVDCT -> DOGEXP.
     // The Bark warp is 6*asinh(f/600). The default Bark filterbank is
@@ -1075,7 +1075,7 @@ Matrix computeApproxFeatureInit16k(const std::vector<double>& samples,
         --lastFilt;
     }
     if (lastFilt <= firstGood) {
-        throw std::runtime_error("invalid recovered Bark filter range");
+        throw std::runtime_error("invalid Bark filter range");
     }
     const int activeFilters = lastFilt - firstGood; // feature.dll uses [firstGood,lastFilt)
 

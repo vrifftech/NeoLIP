@@ -8,6 +8,10 @@ NeoLIP is a wxWidgets application for generating KotOR-compatible `.lip` files f
 WAV + TXT -> KotOR .lip
 ```
 
+Support is offered in the OpenKotOR Discord.
+
+[![OpenKotOR Discord](https://discordapp.com/api/guilds/739590575359262792/widget.png?style=banner2)](https://discord.gg/OpenKotOR)
+
 ## Included source
 
 ```text

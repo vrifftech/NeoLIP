@@ -1596,8 +1596,17 @@ FullFrontendFeatures computeFullFrontendFromPreDcWavs(const Pcm16Mono& wave16Pre
 }
 
 FullFrontendFeatures computeFullFrontendFromOriginalWav(const Pcm16Mono& original) {
-    Pcm16Mono wave16 = sampleConvertWaveDllCompatible(original, 16000);
-    Pcm16Mono wave8 = sampleConvertWaveDllCompatible(original, 8000);
+    Pcm16Mono downsampled;
+    const Pcm16Mono* source = &original;
+    // Half-rate stages keep the final 16/8 kHz filters within their tap limit.
+    while (source->sampleRate > 48000) {
+        downsampled = sampleConvertWaveDllCompatible(*source, source->sampleRate / 2);
+        // Preserve level across intermediate stages; the final filters apply 0.8.
+        for (double& sample : downsampled.samples) sample *= 1.25;
+        source = &downsampled;
+    }
+    Pcm16Mono wave16 = sampleConvertWaveDllCompatible(*source, 16000);
+    Pcm16Mono wave8 = sampleConvertWaveDllCompatible(*source, 8000);
     return computeFullFrontendFromPreDcWavs(wave16, wave8);
 }
 

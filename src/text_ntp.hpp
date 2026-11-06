@@ -9,24 +9,11 @@
 
 namespace cslu {
 
-enum class NtpOutputMode {
-    SimpleLinear,
-    CsluAutomatic
-};
-
 struct TextToNtpOptions {
-    std::filesystem::path faRoot;
-    std::vector<std::filesystem::path> overrideDictionaries;
-    std::filesystem::path customDictionary;
-    std::filesystem::path cmuDictionaryDir;
-    std::filesystem::path ogiLexiconPath;
-    std::filesystem::path ogiAddendaPath;
-    NtpOutputMode mode = NtpOutputMode::CsluAutomatic;
-    bool customFirst = true;
+    std::filesystem::path dictionary;
+    std::filesystem::path userDictionary;
     bool includeInitialPause = true;
     bool includeFinalPause = true;
-    bool useOgiLexicon = true;
-    bool useOgiAddenda = true;
     bool failOnUnknown = true;
     bool useCompositionalPronunciations = true;
     bool useInflectionPronunciations = true;
@@ -71,7 +58,6 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-TextToNtpOptions makeDefaultTextToNtpOptions(const std::filesystem::path& faRoot);
 TextToNtpResult textToNtpFromSource(const std::string& textOrFile, const TextToNtpOptions& options);
 void writeNtpFile(const std::filesystem::path& path, const std::string& ntp);
 void writeTextToNtpSourceReport(const std::filesystem::path& path, const TextToNtpResult& result);

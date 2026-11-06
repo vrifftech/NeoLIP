@@ -38,17 +38,9 @@ struct LipTailRestOptions {
     int fixedMs = 0;
 };
 
-enum class LipSmoothingPreset {
-    None,
-    Light,
-    Medium,
-    Strong
-};
-
 struct LipQualityOptions {
     bool closeOnPause = true;
     int closeOnPauseMs = 160;
-    LipSmoothingPreset smoothing = LipSmoothingPreset::Light;
     // Maximum blend window; never a rule for deleting nearby keys.
     // Every distinct mapped pose and both hold anchors are retained.
     int maxBlendMs = 40;
@@ -58,9 +50,6 @@ struct LipQualityOptions {
 };
 
 int resolveTailRestMs(int phnDurationMs, const LipTailRestOptions& options);
-LipSmoothingPreset parseLipSmoothingPreset(const std::string& value);
-const char* lipSmoothingPresetName(LipSmoothingPreset preset);
-void applyLipSmoothingPreset(LipQualityOptions& options, LipSmoothingPreset preset);
 
 const std::vector<LipShapeInfo>& kotorLipShapes();
 const char* kotorLipShapeName(std::uint8_t shape);

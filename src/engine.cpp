@@ -139,10 +139,7 @@ std::vector<fs::path> modelFiles(const fs::path& root) {
     return paths;
 }
 std::vector<fs::path> dictionaryFiles(const fs::path& root) {
-    std::vector<fs::path> paths = {root / "custom_dictionary.txt", root / "kotor_override.dict",
-        root / "ogi_lex.out", root / "ogi_lex_addenda.scm"};
-    for (char c = 'a'; c <= 'z'; ++c) paths.push_back(root / "cmu" / (std::string(1, c) + ".ob"));
-    return paths;
+    return {root / "lexicon.tsv"};
 }
 struct AssetTreeFingerprints {
     std::string models;
@@ -174,14 +171,8 @@ bool complete(const fs::path& root, bool models) {
 }
 cslu::TextToNtpOptions textOptions(const Assets& assets) {
     cslu::TextToNtpOptions opt;
-    opt.faRoot = assets.models;
-    opt.customDictionary = assets.dictionaries / "custom_dictionary.txt";
-    opt.cmuDictionaryDir = assets.dictionaries / "cmu";
-    opt.ogiLexiconPath = assets.dictionaries / "ogi_lex.out";
-    opt.ogiAddendaPath = assets.dictionaries / "ogi_lex_addenda.scm";
-    if (!assets.userDictionary.empty() && file(assets.userDictionary)) opt.overrideDictionaries.push_back(assets.userDictionary);
-    opt.overrideDictionaries.push_back(assets.dictionaries / "kotor_override.dict");
-    opt.mode = cslu::NtpOutputMode::CsluAutomatic;
+    opt.dictionary = assets.dictionaries / "lexicon.tsv";
+    opt.userDictionary = assets.userDictionary;
     opt.failOnUnknown = false;
     return opt;
 }
@@ -233,7 +224,6 @@ cslu::LipQualityOptions qualityFor(MouthMovement movement) {
     // Both modes use the same phoneme alignment and preserve pose/hold order.
     // Only the bounded blend window differs; neither drops short phonemes.
     if (movement == MouthMovement::MinimalSmoothing) {
-        cslu::applyLipSmoothingPreset(quality, cslu::LipSmoothingPreset::None);
         quality.maxBlendMs = 10;
     }
     return quality;
@@ -365,26 +355,7 @@ Result Engine::preview(const CreateRequest& request, const Context& context) {
     Result result; result.input=request.audio;result.output=request.output;result.audioChannel=request.audioChannel;
     cslu::ScopedWorkControl control(context.work);
     try {
-        report(context,"Checking current inputs");
-        if(!impl_->prepared) throw std::runtime_error("Create a LIP before comparing mouth presets.");
-        const auto key=impl_->refreshInputs(request);
-        if(!impl_->prepared || impl_->prepared->fingerprint!=key)
-            throw std::runtime_error("The audio, transcript, pronunciations or models changed. Create the LIP again before comparing presets.");
-        result.previewLip=std::make_shared<const cslu::LipFile>(cslu::phnToLip(impl_->prepared->phonemes,{},qualityFor(request.movement)));
-        result.prepared=impl_->prepared;result.audio=impl_->prepared->audio;result.warnings=impl_->prepared->warnings;
-        result.words=impl_->prepared->words;result.transcript=impl_->prepared->transcript;
-        result.durationSeconds=result.previewLip->durationSeconds;result.mouthKeys=result.previewLip->frames.size();
-        result.reusedAlignment=true;result.status=Status::Previewed;
-        result.message="Preset preview ready. No file has been changed.";
-    } catch(const cslu::OperationCancelled&) {result.status=Status::Cancelled;result.message="Cancelled.";}
-      catch(const std::exception& e) {result.message=e.what();}
-    return result;
-}
-Result Engine::create(const CreateRequest& request, const Context& context) {
-    Result result; result.input=request.audio;result.output=request.output;result.audioChannel=request.audioChannel;
-    cslu::ScopedWorkControl control(context.work);
-    try {
-        report(context,"Checking pronunciations");requireOutput(request);
+        report(context,"Checking pronunciations");
         if(trim(request.spokenText).empty())throw std::runtime_error("Enter the words spoken in the recording.");
         const auto key=impl_->refreshInputs(request);
         if(!impl_->prepared || impl_->prepared->fingerprint!=key) {
@@ -427,13 +398,28 @@ Result Engine::create(const CreateRequest& request, const Context& context) {
         result.prepared=impl_->prepared;result.audio=impl_->prepared->audio;result.warnings=impl_->prepared->warnings;
         result.words=impl_->prepared->words;result.transcript=impl_->prepared->transcript;
         auto lip=std::make_shared<const cslu::LipFile>(cslu::phnToLip(impl_->prepared->phonemes,{},qualityFor(request.movement)));
-        report(context,"Saving LIP");AtomicOutput output(request.output);
-        cslu::writeLip(output.temporary,*lip);validateWritten(output.temporary);context.work.check();output.commit(request.replaceExisting);
-        result.previewLip=lip;result.status=Status::Created;result.durationSeconds=lip->durationSeconds;result.mouthKeys=lip->frames.size();
-        result.message="Created "+neoshared::pathToUtf8(request.output.filename());
-        if(!result.warnings.empty())result.message+=" - review suggested";
+        result.previewLip=lip;result.status=Status::Previewed;result.durationSeconds=lip->durationSeconds;result.mouthKeys=lip->frames.size();
+        result.message="Generated LIP. Preview or edit it, then Save.";
     } catch(const cslu::OperationCancelled&) {result.status=Status::Cancelled;result.message="Cancelled. No partial LIP was saved.";}
       catch(const std::exception& e) {result.status=Status::Failed;result.message=e.what();}
+    return result;
+}
+
+Result Engine::create(const CreateRequest& request, const Context& context) {
+    Result result;
+    result.input = request.audio; result.output = request.output;
+    try {
+        requireOutput(request);
+        result = preview(request, context);
+        if (result.status != Status::Previewed) return result;
+        report(context, "Saving LIP");
+        AtomicOutput output(request.output);
+        cslu::writeLip(output.temporary, *result.previewLip);
+        validateWritten(output.temporary); context.work.check(); output.commit(request.replaceExisting);
+        result.status = Status::Created;
+        result.message = "Created " + displayPath(request.output.filename());
+    } catch (const cslu::OperationCancelled&) { result.status = Status::Cancelled; result.message = "Cancelled. No partial LIP was saved."; }
+      catch (const std::exception& e) { result.status = Status::Failed; result.message = e.what(); }
     return result;
 }
 

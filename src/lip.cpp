@@ -338,44 +338,6 @@ int resolveTailRestMs(int phnDurationMs, const LipTailRestOptions& options) {
     return 500;
 }
 
-LipSmoothingPreset parseLipSmoothingPreset(const std::string& valueIn) {
-    std::string value = valueIn;
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
-    if (value == "none" || value == "off" || value == "0") return LipSmoothingPreset::None;
-    if (value == "light") return LipSmoothingPreset::Light;
-    if (value == "medium" || value == "med") return LipSmoothingPreset::Medium;
-    if (value == "strong") return LipSmoothingPreset::Strong;
-    throw std::runtime_error("unknown LIP smoothing preset: " + valueIn);
-}
-
-const char* lipSmoothingPresetName(LipSmoothingPreset preset) {
-    switch (preset) {
-        case LipSmoothingPreset::None: return "none";
-        case LipSmoothingPreset::Light: return "light";
-        case LipSmoothingPreset::Medium: return "medium";
-        case LipSmoothingPreset::Strong: return "strong";
-    }
-    return "light";
-}
-
-void applyLipSmoothingPreset(LipQualityOptions& options, LipSmoothingPreset preset) {
-    options.smoothing = preset;
-    switch (preset) {
-        case LipSmoothingPreset::None:
-            options.maxBlendMs = 10;
-            break;
-        case LipSmoothingPreset::Light:
-            options.maxBlendMs = 40;
-            break;
-        case LipSmoothingPreset::Medium:
-            options.maxBlendMs = 60;
-            break;
-        case LipSmoothingPreset::Strong:
-            options.maxBlendMs = 80;
-            break;
-    }
-}
-
 const std::vector<LipShapeInfo>& kotorLipShapes() {
     static const std::vector<LipShapeInfo> shapes = {
         {0,  "EE",    "i:"},

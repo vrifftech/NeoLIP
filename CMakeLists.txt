@@ -141,35 +141,7 @@ endif()
 # Runtime assets are installed with either executable; core-only builds install no assets.
 set(NEOLIP_CSLU_RUNTIME_DIR "${CMAKE_CURRENT_LIST_DIR}/third_party/cslu_runtime")
 set(NEOLIP_CSLU_FA_DIR "${NEOLIP_CSLU_RUNTIME_DIR}/Toolkit/2.0/apps/fa")
-set(NEOLIP_CSLU_CMU_DIR "${NEOLIP_CSLU_RUNTIME_DIR}/Toolkit/2.0/script/dictionary_1.0/cmu")
-set(NEOLIP_CSLU_OGI_LEXICON "${NEOLIP_CSLU_RUNTIME_DIR}/Festival/1.4.2/festival/lib/dicts/ogi_lex.out")
-set(NEOLIP_CSLU_OGI_ADDENDA "${NEOLIP_CSLU_RUNTIME_DIR}/Festival/1.4.2/festival/lib/ogi_lex_addenda.scm")
 set(NEOLIP_BUNDLED_DICTIONARY_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/dictionaries")
-set(NEOLIP_BUNDLED_CMU_DIR "${NEOLIP_BUNDLED_DICTIONARY_ROOT}/cmu")
-set(NEOLIP_BUNDLED_OGI_LEXICON "${NEOLIP_BUNDLED_DICTIONARY_ROOT}/ogi_lex.out")
-set(NEOLIP_BUNDLED_OGI_ADDENDA "${NEOLIP_BUNDLED_DICTIONARY_ROOT}/ogi_lex_addenda.scm")
-
-# The text aligner must never configure successfully with a partial dictionary
-# bundle: missing data otherwise appears later as every transcript word being
-# unknown. These are the pronunciation assets from the supplied CSLU Toolkit,
-# augmented by NeoLIP's KOTOR-specific override.
-set(NEOLIP_REQUIRED_DICTIONARY_ASSETS
-    "${NEOLIP_BUNDLED_DICTIONARY_ROOT}/custom_dictionary.txt"
-    "${NEOLIP_BUNDLED_OGI_LEXICON}"
-    "${NEOLIP_BUNDLED_OGI_ADDENDA}"
-    "${NEOLIP_BUNDLED_DICTIONARY_ROOT}/kotor_override.dict"
-)
-foreach(_neolip_letter IN ITEMS a b c d e f g h i j k l m n o p q r s t u v w x y z)
-    list(APPEND NEOLIP_REQUIRED_DICTIONARY_ASSETS
-        "${NEOLIP_BUNDLED_CMU_DIR}/${_neolip_letter}.ob")
-endforeach()
-foreach(_neolip_dictionary_asset IN LISTS NEOLIP_REQUIRED_DICTIONARY_ASSETS)
-    if(NOT EXISTS "${_neolip_dictionary_asset}")
-        message(FATAL_ERROR
-            "NeoLIP's pronunciation dictionary bundle is incomplete: "
-            "${_neolip_dictionary_asset}")
-    endif()
-endforeach()
 
 # Direct Windows wxWidgets variables. These remain available for source-built wxWidgets trees.
 set(NEOLIP_WX_ROOT_DIR "" CACHE PATH "Root of an installed wxWidgets tree, for example C:/wxWidgets-3.2.6")

@@ -8,6 +8,11 @@
 #include <iostream>
 #include <stdexcept>
 #include <vector>
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#elif defined(__linux__)
+#include <sys/auxv.h>
+#endif
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -21,6 +26,23 @@ namespace fs = std::filesystem;
 namespace {
 volatile std::sig_atomic_t interrupted = 0;
 void interrupt(int) { interrupted = 1; }
+fs::path executablePath([[maybe_unused]] const char* name) {
+#ifdef _WIN32
+    std::wstring path(32768, L'\0');
+    path.resize(GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size())));
+    return fs::path(path);
+#elif defined(__APPLE__)
+    std::uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);
+    std::string path(size, '\0');
+    _NSGetExecutablePath(path.data(), &size);
+    return fs::path(path.c_str());
+#elif defined(__EMSCRIPTEN__)
+    return neoshared::pathFromUtf8(name);
+#else
+    return fs::path(reinterpret_cast<const char*>(getauxval(AT_EXECFN)));
+#endif
+}
 void print(const neolip::Result& result) {
     std::cout << result.message << '\n';
     if (result.status == neolip::Status::Created)
@@ -34,10 +56,10 @@ static int commandMain(int argc, char** argv) {
         const auto usage = [](std::ostream& out) {
             out << "NeoLIP " CSLU_APP_VERSION "\n"
                 "Usage: neolip-cli <command> [options]\n"
-                "create <wav> <transcript.txt> <output.lip> --models <folder> --dictionaries <folder> [--minimal] [--replace] [--channel N]\n"
-                "batch <input folder> <output folder> --models <folder> --dictionaries <folder> [--minimal] [--replace] [--recursive]\n"
-                "dialogue <file.dlg> <game directory or search folder> <output folder> [--tlk dialog.tlk] [--scan-only] --models <folder> --dictionaries <folder> [--minimal] [--replace]\n"
-                "lookup <word> --models <folder> --dictionaries <folder> [--user-dictionary <file>]\n"
+                "create <audio> <transcript.txt> <output.lip> [--models <folder>] [--dictionaries <folder>] [--minimal] [--replace] [--channel N]\n"
+                "batch <input folder> <output folder> [--models <folder>] [--dictionaries <folder>] [--minimal] [--replace] [--recursive]\n"
+                "dialogue <file.dlg> <game directory or search folder> <output folder> [--tlk dialog.tlk] [--scan-only] [--models <folder>] [--dictionaries <folder>] [--minimal] [--replace]\n"
+                "lookup <word> [--models <folder>] [--dictionaries <folder>] [--user-dictionary <file>]\n"
                 "--help, -h   Show usage without loading assets.\n"
                 "--version    Show the application version.\n";
         };
@@ -73,6 +95,14 @@ static int commandMain(int argc, char** argv) {
         }
         if (command != "dialogue" && (scanOnly || !talkTable.empty()))
             throw std::runtime_error("--tlk and --scan-only apply only to dialogue batches");
+        const auto engineAssets = [&]() {
+            if (assets.models.empty() || assets.dictionaries.empty()) {
+                const auto bundled = neolip::discoverAssets(executablePath(argv[0]), {});
+                if (assets.models.empty()) assets.models = bundled.models;
+                if (assets.dictionaries.empty()) assets.dictionaries = bundled.dictionaries;
+            }
+            return assets;
+        };
         std::signal(SIGINT, interrupt); std::signal(SIGTERM, interrupt);
         std::atomic<bool> cancel{false};
         neolip::Context context;
@@ -92,13 +122,13 @@ static int commandMain(int argc, char** argv) {
             }
             if (scanOnly) return unresolved ? 1 : 0;
             if (plan.batch.pairs.empty()) throw std::runtime_error("No dialogue lines have both recorded audio and resolved text.");
-            neolip::Engine engine(assets);
+            neolip::Engine engine(engineAssets());
             const auto result = engine.batch(plan.batch, movement, replace, context, print);
             std::cout << result.created << " created, " << result.skipped << " kept, " << result.failed << " failed; " << unresolved << " unresolved dialogue nodes.\n";
             return result.failed || result.cancelled || unresolved ? 1 : 0;
         }
         if (command == "create" && positional.size() == 3) {
-            neolip::Engine engine(assets);
+            neolip::Engine engine(engineAssets());
             auto result = engine.create({neoshared::pathFromUtf8(positional[0]), neolip::readTranscript(neoshared::pathFromUtf8(positional[1])),
                 neoshared::pathFromUtf8(positional[2]), movement, replace, channel}, context);
             print(result); return result.status == neolip::Status::Created ? 0 : 1;
@@ -108,14 +138,14 @@ static int commandMain(int argc, char** argv) {
             const auto plan = neolip::planBatch(neoshared::pathFromUtf8(positional[0]), neoshared::pathFromUtf8(positional[1]), recursive, context);
             if (plan.pairs.empty()) throw std::runtime_error("No matching audio/transcript pairs.");
             for (const auto& problem : plan.problems) std::cerr << "Excluded: " << problem << '\n';
-            neolip::Engine engine(assets);
+            neolip::Engine engine(engineAssets());
             const auto result = engine.batch(plan, movement, replace, context, print);
             std::cout << result.created << " created, " << result.skipped << " skipped, " << result.failed << " failed; "
                 << plan.missingTranscripts.size() << " audio files without transcripts.\n";
             return result.failed || result.cancelled || !plan.problems.empty() ? 1 : 0;
         }
         if (command == "lookup" && positional.size() == 1) {
-            neolip::Engine engine(assets);
+            neolip::Engine engine(engineAssets());
             const auto result = engine.pronounce(positional[0], context);
             for (const auto& word : result.wordInfo) std::cout << word.word << ": " << word.pronunciation << '\n';
             return result.unknownWords.empty() ? 0 : 1;

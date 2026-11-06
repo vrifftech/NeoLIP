@@ -301,7 +301,7 @@ public:
 
 // Only value objects cross the worker/UI boundary. No worker touches a widget.
 struct UiMessage {
-    enum class Kind { Progress, Preview, Single, Plan, Item, Batch, Scan, Lookup, Audio, BatchAudio, UserWords, LegacyImported, Error };
+    enum class Kind { Progress, Single, Plan, Item, Batch, Scan, Lookup, Audio, BatchAudio, UserWords, LegacyImported, Error };
     Kind kind = Kind::Error;
     neolip::Progress progress;
     neolip::Result single;
@@ -393,12 +393,6 @@ public:
 #endif
         ApplyDarkMode(settings_.darkMode());
         wxui::setStatusText(*this, "Choose audio and enter its spoken text.");
-        // Opening the application must not read dictionaries or validate an old
-        // import. Load the list only when its page is used; migration is explicit.
-        notebook_->Bind(wxEVT_NOTEBOOK_PAGE_CHANGED, [this](wxBookCtrlEvent& event) {
-            event.Skip();
-            if (event.GetSelection() == 3 && !userWordsLoaded_ && !running_) LoadUserWords();
-        });
     }
     ~MainFrame() override {
         cancel_.store(true);
@@ -412,19 +406,20 @@ private:
     wxNotebook* notebook_ = nullptr;
     wxFilePickerCtrl* wavPicker_ = nullptr;
     wxTextCtrl* literalText_ = nullptr;
-    wxChoice *movement_ = nullptr, *batchMovement_ = nullptr, *existingPolicy_ = nullptr;
+    wxChoice* existingPolicy_ = nullptr;
     wxStaticText *outputLabel_ = nullptr, *transcriptLabel_ = nullptr, *batchSummary_ = nullptr, *batchOutputLabel_ = nullptr;
     wxDirPickerCtrl *batchInput_ = nullptr, *scanInput_ = nullptr;
     wxChoice* batchSource_ = nullptr;
     wxPanel* dialogueOptions_ = nullptr;
     wxFilePickerCtrl *dialoguePicker_ = nullptr, *dialogueTlk_ = nullptr;
     wxStaticText *batchIntro_ = nullptr, *batchInputLabel_ = nullptr;
-    wxButton *dialogueReview_ = nullptr, *batchScan_ = nullptr;
+    wxButton* batchScan_ = nullptr;
     std::optional<neolip::DialoguePlan> dialoguePlan_;
     wxString scannedDialogue_, scannedTalkTable_;
-    wxCheckBox *recursive_ = nullptr, *scanRecursive_ = nullptr;
-    wxButton *batchRun_ = nullptr, *cancelButton_ = nullptr, *openEditorButton_ = nullptr,
-        *showFolderButton_ = nullptr, *newButton_ = nullptr, *addUnknownButton_ = nullptr, *retryButton_ = nullptr;
+    wxCheckBox* scanRecursive_ = nullptr;
+    bool includeSubfolders_ = true;
+    wxButton *batchRun_ = nullptr, *cancelButton_ = nullptr,
+        *showFolderButton_ = nullptr, *addUnknownButton_ = nullptr, *retryButton_ = nullptr;
     wxPanel* resultPanel_ = nullptr;
     wxStaticText *resultTitle_ = nullptr, *resultBody_ = nullptr;
     wxGauge* gauge_ = nullptr;
@@ -440,7 +435,6 @@ private:
     neolip::ScanResult scanResult_;
     neolip::BatchPlan batchPlan_;
     neolip::BatchResult lastBatch_;
-    std::optional<neolip::CreateRequest> lastCreate_;
     fs::path createOutput_, lastAudio_, batchOutput_, lastOutput_;
     wxString lastAudioDir_, lastBatchDir_, lastOutputDir_, legacyDictionary_;
     bool scannedRecursive_ = true, batchRetry_ = false;
@@ -457,7 +451,6 @@ private:
     std::unique_ptr<neogames::OpenGameDirectoryMenu> gameDirectoryMenu_;
 
     // Existing timeline/table editor, without PHN or redundant output pickers.
-    wxFilePickerCtrl *timelineAudioPicker_ = nullptr, *timelineLipPicker_ = nullptr;
     LipTimelinePanel* timelinePanel_ = nullptr;
     wxStaticText *timelineStatus_ = nullptr, *timelineSelection_ = nullptr, *lipEditorStatus_ = nullptr;
     wxChoice* timelineShapeChoice_ = nullptr;
@@ -471,9 +464,8 @@ private:
     const GuiWaveform& TimelineWaveform() const { static const GuiWaveform empty; return timelineAudio_ ? timelineAudio_->waveform : empty; }
     neolip::AudioPlayback playback_;
     wxTimer playbackTimer_{this};
-    wxButton* playButton_ = nullptr;
+    wxButton *playButton_ = nullptr, *saveButton_ = nullptr;
     wxCheckBox* loopSelection_ = nullptr;
-    wxChoice* previewMovement_ = nullptr;
     wxPanel* reviewPanel_ = nullptr;
     wxChoice* reviewChoice_ = nullptr;
     std::vector<neolip::ReviewWarning> reviewWarnings_;
@@ -493,14 +485,16 @@ private:
     double replayEnd_ = -1;
 
     std::shared_ptr<neolip::Engine> singleEngine_;
-    neolip::Result lastSingle_;
     int createChannel_ = -1;
-    bool playbackTicking_ = false, presetPreviewAvailable_ = false;
-    bool clearingHighlights_ = false, presetOnlyChange_ = false;
-    int displayedPreviewSelection_ = 0;
+    bool playbackTicking_ = false, canRegenerate_ = false;
+    bool clearingHighlights_ = false, generatedPreview_ = false;
     double timelineLipDuration_ = 0.0;
     fs::path editorPath_;
-    bool synchronizingEditViews_ = false, lipEditorDirty_ = false;
+    bool synchronizingEditViews_ = false, lipEditorDirty_ = false, editorHasSavedFile_ = false;
+    neolip::MouthMovement movement_ = neolip::MouthMovement::Natural;
+    wxMenuItem *naturalMovement_ = nullptr, *minimalMovement_ = nullptr;
+    wxDialog* pronunciationDialog_ = nullptr;
+    wxStaticText* pronunciationStatus_ = nullptr;
     struct EditSnapshot { std::vector<GuiLipEntry> keys; double duration = 0; };
     std::vector<EditSnapshot> undoLip_, redoLip_;
     EditSnapshot savedLip_;
@@ -513,7 +507,7 @@ private:
     }
     void RememberLipEdit() {
         PausePlayback();
-        presetOnlyChange_ = false;
+        generatedPreview_ = false;
         if (undoLip_.empty() || !SameSnapshot(undoLip_.back())) {
             if (undoLip_.size() >= 100) undoLip_.erase(undoLip_.begin());
             undoLip_.push_back({lipEditorEntries_, timelineLipDuration_});
@@ -528,7 +522,7 @@ private:
         if (source.empty()) return;
         target.push_back({lipEditorEntries_, timelineLipDuration_});
         auto snapshot = std::move(source.back()); source.pop_back();
-        lipEditorEntries_ = std::move(snapshot.keys); timelineLipDuration_ = snapshot.duration; presetOnlyChange_=false;
+        lipEditorEntries_ = std::move(snapshot.keys); timelineLipDuration_ = snapshot.duration; generatedPreview_=false;
         timelineEntries_ = lipEditorEntries_; lipEditorDirty_ = !SameSnapshot(savedLip_);
         RefreshLipGrid(); RefreshTimelinePanel();
     }
@@ -540,17 +534,30 @@ private:
         button->Bind(wxEVT_BUTTON, [handler = std::move(handler)](wxCommandEvent&) { handler(); });
         return button;
     }
-    wxChoice* MovementChoice(wxWindow* parent) {
-        auto* choice = new wxChoice(parent, wxID_ANY);
-        choice->Append("Natural"); choice->Append("Minimal smoothing"); choice->SetSelection(0);
-        choice->SetToolTip("Both preserve WAV-aligned pose order and holds. Natural uses broader bounded blends; Minimal smoothing uses shorter transitions.");
-        return choice;
+    void SetMovement(neolip::MouthMovement movement) {
+        movement_ = movement;
+        naturalMovement_->Check(movement == neolip::MouthMovement::Natural);
+        minimalMovement_->Check(movement == neolip::MouthMovement::MinimalSmoothing);
     }
-    neolip::MouthMovement SelectedMovement(wxChoice* choice) const {
-        return choice->GetSelection() == 1 ? neolip::MouthMovement::MinimalSmoothing : neolip::MouthMovement::Natural;
+    void ShowPronunciations() {
+        wxui::applyTheme(pronunciationDialog_, settings_.darkMode());
+        neoview::applyFontScale(pronunciationDialog_, fontScale_);
+        pronunciationDialog_->Show(); pronunciationDialog_->Raise();
+        if (!userWordsLoaded_ && !running_) LoadUserWords();
     }
     void BuildMenus() {
         auto* menuBar = new wxMenuBar(); auto* file = new wxMenu();
+        auto* open = file->Append(wxID_OPEN, "&Open...\tCtrl+O");
+        Bind(wxEVT_MENU, [this](wxCommandEvent&) {
+            wxui::requestOpenFile(this, "Open audio, LIP or dialogue",
+                "NeoLIP files|*.wav;*.WAV;*.mp3;*.MP3;*.lip;*.LIP;*.dlg;*.DLG;*.txt;*.lab|All files|*",
+                [this](std::optional<fs::path> path) { if (path) HandleDrop(wxArrayString{ToWx(*path)}); });
+        }, open->GetId());
+        file->Append(wxID_NEW, "&New\tCtrl+N");
+        Bind(wxEVT_MENU, [this](wxCommandEvent&) { ClearCreate(); }, wxID_NEW);
+        file->Append(ID_SaveLipEditor, "&Save\tCtrl+S");
+        file->Append(ID_SaveLipEditorAs, "Save &As...\tCtrl+Shift+S");
+        file->AppendSeparator();
         auto* gameMenu = new wxMenu();
         gameMenu->Append(wxID_ANY, "Saved game directories")->Enable(false);
         file->AppendSubMenu(gameMenu, "Use Game Directory for &Dialogue");
@@ -566,6 +573,27 @@ private:
             event.Skip();
         });
         file->AppendSeparator(); file->Append(wxID_EXIT, "E&xit"); menuBar->Append(file, "&File");
+        auto* edit = new wxMenu();
+        edit->Append(ID_SetLipDuration, "Set duration...");
+        edit->Append(ID_RepairLipKeys, "Repair keys..."); menuBar->Append(edit, "&Edit");
+        auto* options = new wxMenu(); auto* movement = new wxMenu();
+        naturalMovement_ = movement->AppendRadioItem(wxID_ANY, "Natural");
+        minimalMovement_ = movement->AppendRadioItem(wxID_ANY, "Minimal smoothing");
+        options->AppendSubMenu(movement, "Mouth movement");
+        for (auto* item : {naturalMovement_, minimalMovement_}) {
+            Bind(wxEVT_MENU, [this, item](wxCommandEvent&) {
+                SetMovement(item == naturalMovement_ ? neolip::MouthMovement::Natural : neolip::MouthMovement::MinimalSmoothing);
+                if (notebook_->GetSelection() == 0 && canRegenerate_) RunCreate();
+            }, item->GetId());
+        }
+        auto* recursive = options->AppendCheckItem(wxID_ANY, "Include subfolders in audio batches"); recursive->Check(true);
+        Bind(wxEVT_MENU, [this](wxCommandEvent& event) {
+            includeSubfolders_ = event.IsChecked(); InvalidateBatch(); ScanBatch();
+        }, recursive->GetId());
+        menuBar->Append(options, "&Options");
+        auto* tools = new wxMenu(); auto* pronunciations = tools->Append(wxID_ANY, "Pronunciations...");
+        Bind(wxEVT_MENU, [this](wxCommandEvent&) { ShowPronunciations(); }, pronunciations->GetId());
+        menuBar->Append(tools, "&Tools");
         auto* view = new wxMenu(); darkModeMenuItem_ = view->AppendCheckItem(ID_ToggleDarkMode, "Dark mode");
         view->AppendSeparator(); view->Append(ID_FontIncrease, "Increase Font Size\tCtrl++");
         view->Append(ID_FontDecrease, "Decrease Font Size\tCtrl+-"); view->Append(ID_FontReset, "Reset Font Size\tCtrl+0");
@@ -587,10 +615,16 @@ private:
     void BuildUi() {
         auto* outer = new wxBoxSizer(wxVERTICAL); SetSizer(outer);
         notebook_ = new wxNotebook(this, wxID_ANY);
-        notebook_->AddPage(BuildCreatePage(notebook_), "Create", true);
-        notebook_->AddPage(BuildEditPage(notebook_), "Edit");
+        auto* single = new wxScrolledWindow(notebook_); single->SetScrollRate(0, FromDIP(12));
+        auto* singleSizer = new wxBoxSizer(wxVERTICAL); single->SetSizer(singleSizer);
+        singleSizer->Add(BuildCreatePage(single), 0, wxEXPAND);
+        singleSizer->Add(BuildEditPage(single), 1, wxEXPAND);
+        notebook_->AddPage(single, "Single LIP", true);
         notebook_->AddPage(BuildBatchPage(notebook_), "Batch");
-        notebook_->AddPage(BuildPronunciationPage(notebook_), "Pronunciations");
+        pronunciationDialog_ = new wxDialog(this, wxID_ANY, "Pronunciations", wxDefaultPosition, FromDIP(wxSize(780, 650)), wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER);
+        auto* dictionarySizer = new wxBoxSizer(wxVERTICAL); pronunciationDialog_->SetSizer(dictionarySizer);
+        dictionarySizer->Add(BuildPronunciationPage(pronunciationDialog_), 1, wxEXPAND);
+        pronunciationDialog_->Bind(wxEVT_CLOSE_WINDOW, [this](wxCloseEvent&) { pronunciationDialog_->Hide(); });
         outer->Add(notebook_, 1, wxEXPAND | wxALL, 10);
         resultPanel_ = new wxPanel(this); auto* result = new wxBoxSizer(wxVERTICAL); resultPanel_->SetSizer(result);
         resultTitle_ = new wxStaticText(resultPanel_, wxID_ANY, "Ready");
@@ -602,13 +636,11 @@ private:
         cancelButton_ = Button(resultPanel_, progress, "Cancel", [this]() { cancel_.store(true); resultTitle_->SetLabel("Cancelling safely..."); });
         result->Add(progress, 0, wxEXPAND | wxBOTTOM, 5); gauge_->Hide(); cancelButton_->Hide();
         auto* actions = new wxWrapSizer(wxHORIZONTAL);
-        openEditorButton_ = Button(resultPanel_, actions, "Open in editor", [this]() { OpenLatestResult(); });
 #ifdef __EMSCRIPTEN__
         showFolderButton_ = Button(resultPanel_, actions, "Save result", [this]() { ExportLastOutput(); });
 #else
         showFolderButton_ = Button(resultPanel_, actions, "Show in folder", [this]() { ExportLastOutput(); });
 #endif
-        newButton_ = Button(resultPanel_, actions, "Create another", [this]() { ClearCreate(); });
         addUnknownButton_ = Button(resultPanel_, actions, "Add pronunciations", [this]() { AddUnknownPronunciations(); });
         retryButton_ = Button(resultPanel_, actions, "Retry", [this]() { Retry(); });
         result->Add(actions, 0, wxEXPAND);
@@ -642,13 +674,11 @@ private:
         wavPicker_->SetName("Source audio recording"); AddPickerRow(panel, grid, "Audio", wavPicker_); outer->Add(grid, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 12);
         transcriptLabel_ = new wxStaticText(panel, wxID_ANY, "Spoken text");
         outer->Add(transcriptLabel_, 0, wxLEFT | wxRIGHT | wxBOTTOM, 12);
-        literalText_ = new wxTextCtrl(panel, wxID_ANY, wxString{}, wxDefaultPosition, FromDIP(wxSize(-1, 200)), wxTE_MULTILINE | wxTE_RICH2);
+        literalText_ = new wxTextCtrl(panel, wxID_ANY, wxString{}, wxDefaultPosition, FromDIP(wxSize(-1, 95)), wxTE_MULTILINE | wxTE_RICH2);
         outer->Add(literalText_, 1, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 12);
         auto* textActions = new wxBoxSizer(wxHORIZONTAL);
         Button(panel, textActions, "Load transcript...", [this]() { ImportTranscript(); });
         Button(panel, textActions, "Say as...", [this]() { SaySelectedText(); });
-        Button(panel, textActions, "Check words", [this]() { CheckTranscript(); });
-        literalText_->SetName("Spoken transcript");
         literalText_->SetName("Spoken transcript");
         literalText_->SetToolTip("The visible text is authoritative. Select a name or number, then Say as, to replace only that selection with its spoken form. The original transcript file is not edited.");
         literalText_->Bind(wxEVT_CONTEXT_MENU, [this](wxContextMenuEvent&) {
@@ -662,20 +692,14 @@ private:
             menu.Bind(wxEVT_MENU, [this](wxCommandEvent&) { literalText_->Paste(); }, wxID_PASTE);
             literalText_->PopupMenu(&menu);
         });
-        textActions->AddStretchSpacer(); textActions->Add(new wxStaticText(panel, wxID_ANY, "Mouth movement"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 8);
-        movement_ = MovementChoice(panel); textActions->Add(movement_, 0);
         outer->Add(textActions, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 12);
         outputLabel_ = new wxStaticText(panel, wxID_ANY, "Output: same name and folder as the audio");
         outer->Add(outputLabel_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 12);
         auto* actions = new wxWrapSizer(wxHORIZONTAL);
-        auto* create = Button(panel, actions, "Create LIP", [this]() { RunCreate(); }); create->SetDefault();
-        Button(panel, actions, "Save somewhere else...", [this]() { ChooseCreateOutput(); });
-        Button(panel, actions, "Compare mouth presets...", [this]() { PreviewPreset(SelectedMovement(movement_)); });
-        Button(panel, actions, "Use audio folder", [this]() { if (!lastAudio_.empty()) { createOutput_ = neolip::defaultLipPath(lastAudio_); UpdateOutputLabel(); } });
+        auto* create = Button(panel, actions, "Generate", [this]() { RunCreate(); }); create->SetDefault();
         outer->Add(actions, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 12);
         wavPicker_->Bind(wxEVT_FILEPICKER_CHANGED, [this](wxFileDirPickerEvent& event) { AudioSelected(ToPath(event.GetPath())); });
         literalText_->Bind(wxEVT_TEXT, [this](wxCommandEvent&) { if (!suppressText_) { textDirty_ = true; ClearTranscriptHighlights(); } });
-        movement_->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) { batchMovement_->SetSelection(movement_->GetSelection()); });
         return panel;
     }
     wxPanel* BuildEditPage(wxWindow* parent) {
@@ -683,25 +707,9 @@ private:
         auto* outer = new wxBoxSizer(wxVERTICAL);
         panel->SetSizer(outer);
 
-        auto* grid = new wxFlexGridSizer(2, 6, 6);
-        grid->AddGrowableCol(1, 1);
-        timelineAudioPicker_ = new wxFilePickerCtrl(
-            panel, wxID_ANY, wxEmptyString, "Select source audio",
-            "Audio files (*.wav;*.mp3)|*.wav;*.mp3|All files (*.*)|*.*",
-            wxDefaultPosition, wxDefaultSize, wxFLP_USE_TEXTCTRL | wxFLP_OPEN);
-        timelineLipPicker_ = new wxFilePickerCtrl(
-            panel, wxID_ANY, wxEmptyString, "Open KotOR LIP file",
-            "KotOR LIP files (*.lip)|*.lip|All files (*.*)|*.*",
-            wxDefaultPosition, wxDefaultSize,
-            wxFLP_USE_TEXTCTRL | wxFLP_OPEN | wxFLP_FILE_MUST_EXIST);
-        timelineAudioPicker_->SetName("Preview audio"); timelineLipPicker_->SetName("LIP animation file");
-        AddPickerRow(panel, grid, "Audio", timelineAudioPicker_);
-        AddPickerRow(panel, grid, "LIP", timelineLipPicker_);
-        outer->Add(grid, 0, wxEXPAND | wxALL, 10);
-
         auto* controls = new wxWrapSizer(wxHORIZONTAL);
-        controls->Add(new wxButton(panel, ID_SaveLipEditor, "Save"), 0, wxRIGHT, 8);
-        controls->Add(new wxButton(panel, ID_SaveLipEditorAs, "Save As..."), 0, wxRIGHT, 8);
+        saveButton_ = new wxButton(panel, ID_SaveLipEditor, "Save");
+        controls->Add(saveButton_, 0, wxRIGHT, 8);
         playButton_ = new wxButton(panel, ID_TimelinePlayCursor, "Play");
         playButton_->SetToolTip("Play or pause (Space when editing the timeline)"); controls->Add(playButton_, 0, wxRIGHT, FromDIP(8));
         Button(panel, controls, "Stop", [this]() { StopPlayback(); });
@@ -713,8 +721,6 @@ private:
         Button(panel, controls, "Zoom to selection", [this]() { timelinePanel_->ZoomSelection(); });
         controls->Add(new wxButton(panel, ID_UndoLip, "Undo"), 0, wxRIGHT, 8);
         controls->Add(new wxButton(panel, ID_RedoLip, "Redo"), 0, wxRIGHT, 8);
-        controls->Add(new wxButton(panel, ID_SetLipDuration, "Set duration..."), 0, wxRIGHT, 8);
-        controls->Add(new wxButton(panel, ID_RepairLipKeys, "Repair keys..."), 0, wxRIGHT, 12);
         controls->Add(new wxStaticText(panel, wxID_ANY, "Shape"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
         timelineShapeChoice_ = new wxChoice(panel, ID_TimelineShapeChanged);
         for (int i = 0; i < 16; ++i) timelineShapeChoice_->Append(KotorShapeName(i));
@@ -726,14 +732,6 @@ private:
                                      wxDefaultPosition, FromDIP(wxSize(150, -1)), wxSL_HORIZONTAL);
         controls->Add(timelineZoom_, 0, wxRIGHT, 12);
         outer->Add(controls, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8);
-
-        auto* presets = new wxWrapSizer(wxHORIZONTAL);
-        presets->Add(new wxStaticText(panel, wxID_ANY, "Compare generated movement"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(8));
-        previewMovement_ = MovementChoice(panel); previewMovement_->Enable(false); presets->Add(previewMovement_, 0, wxRIGHT, FromDIP(8));
-        previewMovement_->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) { PreviewPreset(SelectedMovement(previewMovement_)); });
-        Button(panel, presets, "Save selected result", [this]() { SaveLipEditor(false); });
-        presets->Add(new wxStaticText(panel, wxID_ANY, "Preset changes are previews until saved."), 0, wxALIGN_CENTER_VERTICAL);
-        outer->Add(presets, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, FromDIP(8));
 
         documentState_=new wxStaticText(panel,wxID_ANY,"No document");
         outer->Add(documentState_,0,wxEXPAND|wxLEFT|wxRIGHT|wxBOTTOM,FromDIP(8));
@@ -764,7 +762,7 @@ private:
 
         timelineSelection_ = new wxStaticText(panel, wxID_ANY, "No key selected.");
         timelineStatus_ = new wxStaticText(panel, wxID_ANY,
-            "Open a LIP to edit its mouth keys. A matching WAV is loaded automatically.");
+            "Generate from audio and text, or use File > Open to edit an existing LIP.");
         outer->Add(timelineSelection_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 4);
         outer->Add(timelineStatus_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 8);
 
@@ -868,31 +866,29 @@ private:
         dlgFields->Add(new wxStaticText(dialogueOptions_, wxID_ANY, "Dialogue file"), 0, wxBOTTOM, FromDIP(4));
         dialoguePicker_ = new wxFilePickerCtrl(dialogueOptions_, wxID_ANY, wxString{}, "Choose dialogue", "KotOR dialogue (*.dlg)|*.dlg;*.DLG|All files|*", wxDefaultPosition, wxDefaultSize, wxFLP_OPEN | wxFLP_FILE_MUST_EXIST | wxFLP_USE_TEXTCTRL);
         dlgFields->Add(dialoguePicker_, 0, wxEXPAND | wxBOTTOM, FromDIP(8));
-        dlgFields->Add(new wxStaticText(dialogueOptions_, wxID_ANY, "Talk table (automatic; choose only to override the selected folder's dialog.tlk)"), 0, wxBOTTOM, FromDIP(4));
-        dialogueTlk_ = new wxFilePickerCtrl(dialogueOptions_, wxID_ANY, wxString{}, "Choose talk table", "Talk table (*.tlk)|*.tlk;*.TLK|All files|*", wxDefaultPosition, wxDefaultSize, wxFLP_OPEN | wxFLP_FILE_MUST_EXIST | wxFLP_USE_TEXTCTRL);
-        dlgFields->Add(dialogueTlk_, 0, wxEXPAND | wxBOTTOM, FromDIP(8));
+        auto* advanced = new wxCollapsiblePane(dialogueOptions_, wxID_ANY, "Talk table override");
+        auto* tlkSizer = new wxBoxSizer(wxVERTICAL);
+        dialogueTlk_ = new wxFilePickerCtrl(advanced->GetPane(), wxID_ANY, wxString{}, "Choose talk table", "Talk table (*.tlk)|*.tlk;*.TLK|All files|*", wxDefaultPosition, wxDefaultSize, wxFLP_OPEN | wxFLP_FILE_MUST_EXIST | wxFLP_USE_TEXTCTRL);
+        tlkSizer->Add(dialogueTlk_, 0, wxEXPAND | wxALL, FromDIP(6)); advanced->GetPane()->SetSizer(tlkSizer);
+        advanced->Bind(wxEVT_COLLAPSIBLEPANE_CHANGED, [this](wxCollapsiblePaneEvent&) { Layout(); });
+        dlgFields->Add(advanced, 0, wxEXPAND | wxBOTTOM, FromDIP(8));
         outer->Add(dialogueOptions_, 0, wxEXPAND | wxLEFT | wxRIGHT, FromDIP(12)); dialogueOptions_->Hide();
         batchInputLabel_ = new wxStaticText(panel, wxID_ANY, "Audio/transcript folder");
         outer->Add(batchInputLabel_, 0, wxLEFT | wxRIGHT | wxBOTTOM, FromDIP(12));
         batchInput_ = new wxDirPickerCtrl(panel, wxID_ANY, wxString{}, "Choose a game directory or any search folder");
         outer->Add(batchInput_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 12);
         auto* options = new wxWrapSizer(wxHORIZONTAL);
-        recursive_ = new wxCheckBox(panel, wxID_ANY, "Include subfolders"); recursive_->SetValue(true);
-        options->Add(recursive_, 0, wxRIGHT | wxBOTTOM | wxALIGN_CENTER_VERTICAL, 10);
         options->Add(new wxStaticText(panel, wxID_ANY, "Existing LIPs"), 0, wxRIGHT | wxALIGN_CENTER_VERTICAL, 6);
         existingPolicy_ = new wxChoice(panel, wxID_ANY); existingPolicy_->Append("Skip existing"); existingPolicy_->Append("Replace existing"); existingPolicy_->SetSelection(0);
         options->Add(existingPolicy_, 0, wxRIGHT | wxBOTTOM, 12);
-        options->Add(new wxStaticText(panel, wxID_ANY, "Mouth movement"), 0, wxRIGHT | wxALIGN_CENTER_VERTICAL, 6);
-        batchMovement_ = MovementChoice(panel); options->Add(batchMovement_, 0, wxBOTTOM, 7);
         outer->Add(options, 0, wxEXPAND | wxLEFT | wxRIGHT, 12);
         batchOutputLabel_ = new wxStaticText(panel, wxID_ANY, "Output: beside each audio file");
         outer->Add(batchOutputLabel_, 0, wxEXPAND | wxALL, 12);
         auto* actions = new wxWrapSizer(wxHORIZONTAL);
-        batchScan_ = Button(panel, actions, "Scan folder", [this]() { ScanBatch(); });
+        batchScan_ = Button(panel, actions, "Rescan", [this]() { ScanBatch(); });
 #ifndef __EMSCRIPTEN__
-        Button(panel, actions, "Choose a different output folder...", [this]() { ChooseBatchOutput(); });
+        Button(panel, actions, "Output folder...", [this]() { ChooseBatchOutput(); });
 #endif
-        Button(panel, actions, "Use default output", [this]() { batchOutput_.clear(); InvalidateBatch(); });
         batchRun_ = Button(panel, actions, "Create LIP files", [this]() { RunBatch(false); }); batchRun_->Enable(false);
         outer->Add(actions, 0, wxEXPAND | wxLEFT | wxRIGHT, 12);
         batchSummary_ = new wxStaticText(panel, wxID_ANY, "Choose a folder to find matching pairs.");
@@ -906,10 +902,9 @@ private:
         batchFilter_->Bind(wxEVT_CHOICE,[this](wxCommandEvent&){RefreshBatchRows();});
         Button(panel,filterRow,"Previous problem",[this](){NextBatchProblem(-1);});
         Button(panel,filterRow,"Next problem",[this](){NextBatchProblem(1);});
-        Button(panel,filterRow,"Choose voice channel...",[this](){ChooseBatchChannel();});
-        dialogueReview_ = Button(panel, filterRow, "Review dialogue line...", [this]() {
-            ReviewDialogueRow(batchList_->GetNextItem(-1, wxLIST_NEXT_ALL, wxLIST_STATE_SELECTED));
-        }); dialogueReview_->Hide();
+        Button(panel, filterRow, "Open selected", [this]() {
+            OpenBatchRow(batchList_->GetNextItem(-1, wxLIST_NEXT_ALL, wxLIST_STATE_SELECTED));
+        });
         outer->Add(filterRow,0,wxEXPAND|wxLEFT|wxRIGHT|wxBOTTOM,FromDIP(12));
         batchList_ = new wxListCtrl(panel, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxLC_REPORT);
         batchList_->InsertColumn(0, "Audio", wxLIST_FORMAT_LEFT, 320);
@@ -932,9 +927,7 @@ private:
             InvalidateBatch(); ScanBatch();
         });
         dialogueTlk_->Bind(wxEVT_FILEPICKER_CHANGED, [this](wxFileDirPickerEvent&) { InvalidateBatch(); ScanBatch(); });
-        recursive_->Bind(wxEVT_CHECKBOX, [this](wxCommandEvent&) { InvalidateBatch(); ScanBatch(); });
         existingPolicy_->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) { UpdateBatchSummary(); });
-        batchMovement_->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) { movement_->SetSelection(batchMovement_->GetSelection()); });
         return panel;
     }
     wxPanel* BuildPronunciationPage(wxWindow* parent) {
@@ -945,6 +938,8 @@ private:
         lookup_ = new wxTextCtrl(panel, wxID_ANY); lookupRow->Add(lookup_, 1, wxRIGHT, 8);
         Button(panel, lookupRow, "Check word", [this]() { LookupWord(); });
         outer->Add(lookupRow, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 12);
+        pronunciationStatus_ = new wxStaticText(panel, wxID_ANY, "");
+        outer->Add(pronunciationStatus_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 12);
         auto* actions = new wxWrapSizer(wxHORIZONTAL);
         Button(panel, actions, "Add pronunciation...", [this]() { EditPronunciation({}); });
         Button(panel, actions, "Edit selected...", [this]() { EditSelectedPronunciation(); });
@@ -988,7 +983,7 @@ private:
         scanInput_->SetInitialDirectory(lastBatchDir_);
 #endif
         long movement = 0; config.Read("Preferences/MouthMovement", &movement, 0L);
-        movement_->SetSelection(movement == 1 ? 1 : 0); batchMovement_->SetSelection(movement_->GetSelection());
+        SetMovement(movement == 1 ? neolip::MouthMovement::MinimalSmoothing : neolip::MouthMovement::Natural);
         fontScale_ = settings_.fontScale();
         // Keep the old reference until an explicit import succeeds. Do not open
         // this potentially large, stale, or remote file during application launch.
@@ -1026,8 +1021,7 @@ private:
                 std::error_code ec;
                 return fs::equivalent(path, other, ec) && !ec;
             };
-            if (!same(assets.userDictionary) && !same(assets.dictionaries / "kotor_override.dict") &&
-                !same(assets.dictionaries / "custom_dictionary.txt")) {
+            if (!same(assets.userDictionary) && !same(assets.dictionaries / "lexicon.tsv")) {
                 const auto entries = neolip::readUserPronunciations(path);
                 if (!entries.empty()) neolip::importUserPronunciations(assets, entries, false);
             }
@@ -1044,7 +1038,7 @@ private:
         config.Write("Preferences/LastBatchFolder", lastBatchDir_);
         config.Write("Preferences/LastOutputFolder", lastOutputDir_);
 #endif
-        config.Write("Preferences/MouthMovement", static_cast<long>(movement_->GetSelection())); config.Flush();
+        config.Write("Preferences/MouthMovement", static_cast<long>(movement_)); config.Flush();
         settings_.saveWindowPlacement(*this);
 #ifdef __EMSCRIPTEN__
         EM_ASM({ if (window.neoToolsFlushSettings) window.neoToolsFlushSettings(); });
@@ -1189,72 +1183,42 @@ private:
         if(!ConfirmLipEditorChanges()||!AudioSelected(input))return;
         SetTranscript(text,"Original aligned transcript");createOutput_=output;createChannel_=channel;UpdateOutputLabel();notebook_->SetSelection(0);
         literalText_->SetSelection(TextPositionForByte(text,word.beginByte),TextPositionForByte(text,word.endByte));literalText_->SetFocus();
-        SetResult("Correct selected word", "Use Say as for this line, or Add pronunciation for a reusable word. Create again to realign the full line; your saved LIP is not changed until then.");
+        SetResult("Correct selected word", "Use Say as for this line, or Add pronunciation for a reusable word. Generate again to realign the full line, then Save when ready.");
     }
     void UpdateDocumentState() {
+        saveButton_->Enable(!running_ && !lipEditorEntries_.empty());
+        playButton_->Enable(!running_ && bool(timelineAudio_));
         if(documentState_)documentState_->SetLabel(editorPath_.empty()?wxString("No document"):
-            (lipEditorDirty_?(presetOnlyChange_?wxString("Unsaved preset preview"):wxString("Unsaved edits")):wxString("Saved")));
+            (lipEditorDirty_?(generatedPreview_?wxString("Unsaved generated LIP"):wxString("Unsaved edits")):wxString("Saved")));
     }
-    void LoadPreparedResult(const neolip::Result& result, bool unsaved) {
+    void LoadGeneratedLip(const neolip::Result& result) {
         if(!result.previewLip||!result.audio)return;
         const bool sameDocument=editorPath_==result.output && !editorPath_.empty();
         const bool sameAudio=timelineAudio_==result.audio;
         const double cursor=sameAudio?timelinePanel_->CursorSeconds():0;
         const auto range=sameAudio?timelinePanel_->Selection():std::pair<double,double>{0,0};
-        if(unsaved&&sameDocument)RememberLipEdit();
+        if(sameDocument)RememberLipEdit();
         else {undoLip_.clear();redoLip_.clear();}
         StopPlayback();if(!sameAudio)loopSelection_->SetValue(false);
         editorPath_=result.output;editorInput_=result.input;editorChannel_=result.audioChannel;
         timelineAudio_=result.audio;playback_.load(timelineAudio_);
-        if(unsaved&&!sameDocument){
-            try {double duration=0;auto entries=cslu::readKotorKeyframes(result.output,&duration);savedLip_={std::move(entries),duration};}
-            catch(const std::exception&){savedLip_={};}
-        }
         timelineLipDuration_=result.previewLip->durationSeconds;lipEditorEntries_.clear();
         for(const auto& key:result.previewLip->frames)lipEditorEntries_.push_back({key.timeSeconds,key.shape});
         timelineEntries_=lipEditorEntries_;
-        if(!unsaved)savedLip_={lipEditorEntries_,timelineLipDuration_};
-        lipEditorDirty_=!SameSnapshot(savedLip_);presetOnlyChange_=unsaved;
-        timelineLipPicker_->SetPath(ToWx(result.output));timelineAudioPicker_->SetPath(ToWx(result.input));
-        presetPreviewAvailable_=bool(result.prepared);previewMovement_->Enable(presetPreviewAvailable_);
-        previewMovement_->SetSelection(movement_->GetSelection());displayedPreviewSelection_=movement_->GetSelection();
+        if(!sameDocument) savedLip_={};
+        editorHasSavedFile_ = sameDocument && editorHasSavedFile_;
+        lipEditorDirty_=true;generatedPreview_=true;
+        wavPicker_->SetPath(ToWx(result.input));
+        canRegenerate_=bool(result.prepared);
         SetEditorWords(result.words,result.transcript);
-        RefreshLipGrid();RefreshTimelinePanel();notebook_->SetSelection(1);
+        RefreshLipGrid();RefreshTimelinePanel();notebook_->SetSelection(0);
         timelinePanel_->SetRange(range.first,range.second);timelinePanel_->SetCursor(cursor);playback_.seek(cursor);
-    }
-    bool OpenLatestResult() {
-        if(running_||lastOutput_.empty())return false;
-        // Review/navigation is not Revert. Keep live edits, saved state and Undo history.
-        if(editorPath_==lastOutput_){notebook_->SetSelection(1);return true;}
-        if(!ConfirmLipEditorChanges())return false;
-        if(lastSingle_.output==lastOutput_ && lastSingle_.audio) {
-            try {
-                auto current=lastSingle_;
-                current.previewLip=std::make_shared<const cslu::LipFile>(cslu::readLip(lastOutput_));
-                LoadPreparedResult(current,false); // Disk curve, cached source audio; never cached old keys.
-            } catch(const std::exception& e){ShowProblem(e.what());return false;}
-        } else LoadLipEditorPath(ToWx(lastOutput_));
-        return editorPath_==lastOutput_;
-    }
-    void PreviewPreset(neolip::MouthMovement movement) {
-        if (running_) return;
-        if (!lastCreate_ || !singleEngine_) { SetResult("Create a LIP first", "After creation, compare Natural and Minimal smoothing without repeating acoustic alignment."); return; }
-        if (lipEditorDirty_ && !presetOnlyChange_ && !ConfirmLipEditorChanges()) {
-            previewMovement_->SetSelection(displayedPreviewSelection_); return;
-        }
-        auto request = *lastCreate_; request.spokenText = wxui::toStd(literalText_->GetValue());
-        request.audio = ToPath(wavPicker_->GetPath()); request.audioChannel = createChannel_; request.movement = movement;
-        request.output = createOutput_; auto engine = singleEngine_;
-        movement_->SetSelection(movement == neolip::MouthMovement::MinimalSmoothing ? 1 : 0);
-        previewMovement_->SetSelection(movement_->GetSelection());
-        StartJob([engine, request](const neolip::Context& context) { UiMessage message; message.kind = UiMessage::Kind::Preview;
-            message.single = engine->preview(request, context); return message; });
     }
     void ReviewSection() {
         const int selected = reviewChoice_->GetSelection();
         if (selected < 0 || selected >= static_cast<int>(reviewWarnings_.size())) return;
         const auto warning = reviewWarnings_[static_cast<std::size_t>(selected)];
-        if (!OpenLatestResult()) return;
+        notebook_->SetSelection(0);
         if (timelinePanel_) { timelinePanel_->SetRange(warning.startSeconds, warning.endSeconds); timelinePanel_->SetCursor(warning.startSeconds); timelinePanel_->ZoomSelection(); }
         resultBody_->SetLabel(wxui::toWx(warning.message) + "\nThis is a review flag, not an accuracy score.");
         resultBody_->Wrap(std::max(350, GetClientSize().x - FromDIP(50))); Layout();
@@ -1327,12 +1291,13 @@ private:
 
     void ShowProblem(const std::string& message) {
         SetResult("Could not complete the operation", wxui::toWx(message));
-        details_->ChangeValue(wxui::toWx(message)); detailsPane_->Show(); Layout();
+        details_->ChangeValue(wxui::toWx(message)); detailsPane_->Show();
+        pronunciationStatus_->SetLabel(wxui::toWx(message)); Layout();
     }
     void SetResult(const wxString& title, const wxString& body = wxString{}) {
         resultPanel_->Show(); resultTitle_->SetLabel(title); resultBody_->SetLabel(body);
         resultBody_->Wrap(std::max(350, GetClientSize().GetWidth() - 50));
-        for (auto* button : {openEditorButton_, showFolderButton_, newButton_, addUnknownButton_, retryButton_}) button->Hide();
+        for (auto* button : {showFolderButton_, addUnknownButton_, retryButton_}) button->Hide();
         detailsPane_->Collapse(); detailsPane_->Hide();
         if (reviewPanel_) reviewPanel_->Hide();
         Layout();
@@ -1352,13 +1317,23 @@ private:
         suppressText_ = true; literalText_->ChangeValue(wxui::toWx(text)); suppressText_ = false; textDirty_ = false;
         transcriptLabel_->SetLabel(source.empty() ? wxString("Spoken text") : "Spoken text - " + source + " (editable)");
     }
+    void ResetEditor() {
+        StopPlayback(); timelineAudio_.reset(); playback_.load({});
+        editorPath_.clear(); editorInput_.clear(); editorChannel_ = -1;
+        lipEditorEntries_.clear(); timelineEntries_.clear(); undoLip_.clear(); redoLip_.clear(); savedLip_ = {};
+        timelineLipDuration_ = 0; lipEditorDirty_ = false; generatedPreview_ = false; editorHasSavedFile_ = false;
+        canRegenerate_ = false; lastOutput_.clear(); SetEditorWords({}, {});
+        loopSelection_->SetValue(false); timelinePanel_->SetRange(0, 0);
+        RefreshLipGrid(); RefreshTimelinePanel();
+    }
     bool AudioSelected(const fs::path& path) {
         if (running_) { wavPicker_->SetPath(ToWx(lastAudio_)); return false; }
         if (path == lastAudio_) return true;
         std::error_code ec;
         if (path.empty() || !fs::is_regular_file(path, ec)) return false;
-        if (!ConfirmDiscardTranscript()) { wavPicker_->SetPath(ToWx(lastAudio_)); return false; }
-        PausePlayback(); createChannel_ = -1; lastSingle_ = {}; if (singleEngine_) singleEngine_->clearCache();
+        if (!ConfirmDiscardTranscript() || !ConfirmLipEditorChanges()) { wavPicker_->SetPath(ToWx(lastAudio_)); return false; }
+        ResetEditor();
+        PausePlayback(); createChannel_ = -1; if (singleEngine_) singleEngine_->clearCache();
         lastAudio_ = path; wavPicker_->SetPath(ToWx(path)); createOutput_ = neolip::defaultLipPath(path);
         lastAudioDir_ = ToWx(path.parent_path()); SetTranscript({}, {}); UpdateOutputLabel();
         try {
@@ -1395,46 +1370,38 @@ private:
         return ToPath(dialog.GetPath());
 #endif
     }
-    void ChooseCreateOutput() {
-        if (running_) return;
-        const auto selected = ChooseLipOutput("Save LIP somewhere else", createOutput_);
-        if (!selected) return;
-        createOutput_ = *selected; if (createOutput_.extension().empty()) createOutput_ += ".lip";
-        lastOutputDir_ = ToWx(createOutput_.parent_path()); UpdateOutputLabel();
-    }
     void ClearCreate() {
-        if (running_ || !ConfirmDiscardTranscript()) return;
-        lastAudio_.clear(); createOutput_.clear(); lastCreate_.reset(); unknownWords_.clear();
-        PausePlayback(); createChannel_ = -1; lastSingle_ = {}; if (singleEngine_) singleEngine_->clearCache();
+        if (running_ || !ConfirmDiscardTranscript() || !ConfirmLipEditorChanges()) return;
+        ResetEditor();
+        lastAudio_.clear(); createOutput_.clear(); unknownWords_.clear();
+        PausePlayback(); createChannel_ = -1; if (singleEngine_) singleEngine_->clearCache();
         wavPicker_->SetPath(wxString{}); SetTranscript({}, {}); UpdateOutputLabel(); notebook_->SetSelection(0);
         resultPanel_->Hide(); Layout();
     }
-#ifndef __EMSCRIPTEN__
     bool HandleDrop(const wxArrayString& files) {
         if (running_ || files.empty()) return false;
         if (files.size() != 1) { ShowProblem("Drop one WAV, MP3, LIP, DLG, transcript or folder. Use Batch for multiple recordings."); return false; }
         const auto path = ToPath(files[0]);
         try {
             if (fs::is_directory(path)) {
-                notebook_->SetSelection(2); batchInput_->SetPath(ToWx(path));
+                notebook_->SetSelection(1); batchInput_->SetPath(ToWx(path));
                 if (DialogueMode()) dialogueTlk_->SetPath(wxString{});
                 batchOutput_.clear(); lastBatchDir_ = ToWx(path); InvalidateBatch(); ScanBatch(); return true;
             }
             const auto ext = wxFileName(files[0]).GetExt().Lower();
             if (ext == "dlg") {
-                notebook_->SetSelection(2); batchSource_->SetSelection(1); UpdateBatchMode();
+                notebook_->SetSelection(1); batchSource_->SetSelection(1); UpdateBatchMode();
                 dialoguePicker_->SetPath(ToWx(path));
                 if (batchInput_->GetPath().empty()) batchInput_->SetPath(ToWx(path.parent_path()));
                 batchOutput_.clear(); InvalidateBatch(); ScanBatch(); return true;
             }
             if (ext == "wav" || ext == "mp3") { notebook_->SetSelection(0); return AudioSelected(path); }
-            if (ext == "lip") { if (ConfirmLipEditorChanges()) LoadLipEditorPath(files[0]); return true; }
+            if (ext == "lip") { if (ConfirmDiscardTranscript() && ConfirmLipEditorChanges()) LoadLipEditorPath(files[0]); return true; }
             if (ext == "txt" || ext == "lab") { notebook_->SetSelection(0); ImportTranscript(path); return true; }
             ShowProblem("Drop a WAV, LIP, DLG, .txt/.lab transcript, or a batch folder.");
         } catch (const std::exception& e) { ShowProblem(e.what()); }
         return false;
     }
-#endif
     void Post(UiMessage message) {
         auto* event = new wxThreadEvent(NEOLIP_ENGINE_EVENT);
         event->SetPayload(std::make_shared<UiMessage>(std::move(message))); wxQueueEvent(this, event);
@@ -1478,21 +1445,20 @@ private:
         if (running_) return;
         try {
             const auto path = ToPath(wavPicker_->GetPath());
-            if (path.empty() || !fs::is_regular_file(path)) throw std::runtime_error("Choose an existing WAV file.");
+            if (path.empty() || !fs::is_regular_file(path)) throw std::runtime_error("Choose an existing WAV or MP3 recording.");
             if (path != lastAudio_ && !AudioSelected(path)) return;
             const auto assets = Assets();
             if (createOutput_.empty()) createOutput_ = neolip::defaultLipPath(path);
-            const bool existing = fs::exists(createOutput_);
-            if (existing && !ConfirmReplace(createOutput_)) return;
-            neolip::CreateRequest request{path, wxui::toStd(literalText_->GetValue()), createOutput_, SelectedMovement(movement_), existing};
+            if (!generatedPreview_ && !ConfirmLipEditorChanges()) return;
+            neolip::CreateRequest request{path, wxui::toStd(literalText_->GetValue()), createOutput_, movement_, false};
             if (request.spokenText.empty()) throw std::runtime_error("Enter the words spoken in the recording.");
             request.audioChannel = createChannel_;
-            lastCreate_ = request; lastWasBatch_ = false; unknownWords_.clear();
+            lastWasBatch_ = false; unknownWords_.clear();
             if (!singleEngine_) singleEngine_ = std::make_shared<neolip::Engine>(assets);
             auto engine = singleEngine_;
             StartJob([engine, request](const neolip::Context& context) {
                 UiMessage message; message.kind = UiMessage::Kind::Single;
-                message.single = engine->create(request, context); return message;
+                message.single = engine->preview(request, context); return message;
             });
         } catch (const std::exception& e) { ShowProblem(e.what()); }
     }
@@ -1502,10 +1468,9 @@ private:
         return DialogueMode() ? neolip::defaultDialogueOutput(ToPath(dialoguePicker_->GetPath())) : ToPath(batchInput_->GetPath());
     }
     void UpdateBatchMode() {
-        const bool dlg = DialogueMode(); dialogueOptions_->Show(dlg); recursive_->Show(!dlg);
-        dialogueReview_->Show(dlg);
+        const bool dlg = DialogueMode(); dialogueOptions_->Show(dlg);
         wxListItem heading; heading.SetText(dlg ? "Dialogue line / LIP" : "Audio"); batchList_->SetColumn(0, heading);
-        batchScan_->SetLabel(dlg ? "Scan dialogue" : "Scan folder");
+        batchScan_->SetLabel("Rescan");
         batchInputLabel_->SetLabel(dlg ? "Game directory / search folder (all subfolders are searched automatically)" : "Audio/transcript folder");
         batchIntro_->SetLabel(dlg ? "Choose a DLG and a game directory or any folder. Sound and VO_ResRef recordings are resolved automatically; review only unresolved lines." : "Match each WAV or MP3 with a same-name .txt or .lab transcript.");
         Layout();
@@ -1513,7 +1478,7 @@ private:
     void InvalidateBatch() {
         batchPlan_ = {}; dialoguePlan_.reset(); batchRowResults_.clear(); visibleBatchRows_.clear();
         batchRun_->Enable(false); batchList_->DeleteAllItems();
-        batchFilter_->Enable(false); batchFilter_->SetSelection(0); dialogueReview_->Enable(false);
+        batchFilter_->Enable(false); batchFilter_->SetSelection(0);
         batchSummary_->SetLabel(DialogueMode() ? "Choose a DLG and a game directory or search folder, then scan." : "Scan the folder before creating LIPs.");
         if (DialogueMode()) batchOutputLabel_->SetLabel("Output: " + ToWx(BatchOutputPath()));
         else batchOutputLabel_->SetLabel(batchOutput_.empty() ? wxString("Output: beside each audio file") : "Output: " + ToWx(batchOutput_));
@@ -1521,7 +1486,6 @@ private:
     }
     void ShowDialogueRows() {
         if (!dialoguePlan_) return;
-        dialogueReview_->Enable(true);
         batchList_->Freeze(); batchList_->DeleteAllItems(); visibleBatchRows_.clear(); batchFilter_->Enable(false);
         for (const auto& item : dialoguePlan_->rows) {
             std::string label = item.line.label();
@@ -1632,10 +1596,10 @@ private:
         const auto index=BatchIndex(row);if(running_||!index)return;
         const auto item=batchRowResults_[*index];
         if(item.status==neolip::Status::Created||item.status==neolip::Status::Skipped){
-            if(editorPath_!=item.output&&!ConfirmLipEditorChanges())return;
+            if(editorPath_!=item.output && (!ConfirmDiscardTranscript() || !ConfirmLipEditorChanges()))return;
             lastOutput_=item.output;
             if(editorPath_!=item.output){pendingAudioReview_=item;LoadLipEditorPath(ToWx(item.output),item.input,item.audioChannel,item.words,item.transcript);}
-            else notebook_->SetSelection(1);
+            else notebook_->SetSelection(0);
             if(!running_){pendingAudioReview_.reset();SetResult(wxui::toWx(item.message));ShowReviewWarnings(item.warnings);}
         } else if(item.status==neolip::Status::ChannelChoice)ChooseBatchChannel(row);
         else {
@@ -1660,7 +1624,7 @@ private:
     void ScanBatch() {
         if (running_ || batchInput_->GetPath().empty()) return;
         const auto input = ToPath(batchInput_->GetPath()); const auto output = BatchOutputPath();
-        const bool recursive = recursive_->GetValue(); scannedRecursive_ = recursive; lastBatchDir_ = ToWx(input);
+        const bool recursive = includeSubfolders_; scannedRecursive_ = recursive; lastBatchDir_ = ToWx(input);
         scannedDialogue_ = dialoguePicker_->GetPath(); scannedTalkTable_ = dialogueTlk_->GetPath();
         if (DialogueMode()) {
             if (scannedDialogue_.empty()) { SetResult("Choose a DLG file first"); return; }
@@ -1705,7 +1669,7 @@ private:
             const auto currentInput = fs::weakly_canonical(fs::absolute(ToPath(batchInput_->GetPath())));
             const auto currentOutput = fs::weakly_canonical(fs::absolute(BatchOutputPath()));
             if (currentInput != plan.inputRoot || currentOutput != plan.outputRoot ||
-                recursive_->GetValue() != scannedRecursive_ ||
+                includeSubfolders_ != scannedRecursive_ ||
                 (DialogueMode() && (dialoguePicker_->GetPath() != scannedDialogue_ || dialogueTlk_->GetPath() != scannedTalkTable_))) {
                 InvalidateBatch(); ScanBatch(); return;
             }
@@ -1731,11 +1695,10 @@ private:
                 if (count && wxMessageBox(wxString::Format("Replace %zu existing LIP files?", static_cast<std::size_t>(count)),
                     "Replace existing LIPs", wxYES_NO | wxNO_DEFAULT | wxICON_WARNING, this) != wxYES) return;
             }
-            const auto assets = Assets(); const auto movement = SelectedMovement(batchMovement_);
+            const auto assets = Assets(); const auto movement = movement_;
             lastWasBatch_ = true; batchRetry_ = retryOnly;
             if (!retryOnly) lastBatch_ = {};
             unknownWords_.clear(); batchRowResults_.clear(); visibleBatchRows_.clear(); batchList_->DeleteAllItems();
-            dialogueReview_->Enable(false);
             StartJob([this, assets, plan, movement, replace](const neolip::Context& context) {
                 UiMessage message; message.kind = UiMessage::Kind::Batch;
                 neolip::Engine engine(assets);
@@ -1764,24 +1727,12 @@ private:
         running_ = false; notebook_->Enable(); gauge_->Hide(); cancelButton_->Hide();
         if (closingAfterJob_) { CallAfter([this]() { Close(); }); return; }
         switch (message->kind) {
-        case UiMessage::Kind::Preview:
-            if (message->single.status == neolip::Status::Previewed) {
-                lastSingle_ = message->single; LoadPreparedResult(lastSingle_, true);
-                SetResult("Mouth preset preview", "No file has been changed. Play this version, switch presets, then Save selected result.");
-                ShowReviewWarnings(lastSingle_.warnings);
-            } else {
-                previewMovement_->SetSelection(displayedPreviewSelection_); movement_->SetSelection(displayedPreviewSelection_);
-                if (message->single.status == neolip::Status::Cancelled) SetResult("Cancelled", "The saved file has not changed.");
-                else ShowProblem(message->single.message);
-            }
-            break;
         case UiMessage::Kind::Single: {
             const auto& result = message->single;
-            if (result.status == neolip::Status::Created) {
-                lastOutput_ = result.output; textDirty_ = false; lastSingle_ = result;
-                if(editorPath_==result.output)LoadPreparedResult(result,false);
+            if (result.status == neolip::Status::Previewed) {
+                textDirty_ = false;
+                LoadGeneratedLip(result);
                 SetResult(wxui::toWx(result.message), wxString::Format("Duration: %.2f seconds   Mouth keys: %zu", result.durationSeconds, result.mouthKeys));
-                openEditorButton_->Show(); showFolderButton_->Show(); newButton_->Show();
                 ShowReviewWarnings(result.warnings);
             } else if (result.status == neolip::Status::UnknownWords) {
                 unknownWords_ = result.unknownWords;
@@ -1863,6 +1814,7 @@ private:
         }
         case UiMessage::Kind::Scan:
             scanResult_ = std::move(message->scan); RefreshUnknownList();
+            pronunciationStatus_->SetLabel(wxString::Format("%zu transcripts checked; %zu unknown words.", scanResult_.files, scanResult_.words.size()));
             SetResult("Pronunciation check finished", wxString::Format("%zu transcript files checked; %zu unknown words.", scanResult_.files, scanResult_.words.size()));
             if (!scanResult_.errors.empty()) {
                 wxString detail;
@@ -1880,7 +1832,7 @@ private:
             wxString text;
             for (const auto& word : message->lookup.wordInfo)
                 text += wxui::toWx(word.word) + ": " + (word.pronunciation.empty() ? wxString("Unknown") : wxui::toWx(word.pronunciation)) + "\n";
-            SetResult("Pronunciation", text); break;
+            pronunciationStatus_->SetLabel(text); pronunciationDialog_->Layout(); break;
         }
         case UiMessage::Kind::BatchAudio: {
             if(!message->audio)break;
@@ -1909,7 +1861,7 @@ private:
                         reply.audio = neolip::decodeAudio(path, channel); return reply; });
                 }
             } else {
-                editorInput_=message->path;editorChannel_=message->audio?message->audio->selectedChannel:-1;
+                editorInput_=message->path;editorChannel_=message->audio?message->audio->selectedChannel:-1;createChannel_=editorChannel_;
                 timelineAudio_ = std::move(message->audio); playback_.load(timelineAudio_); RefreshTimelinePanel(); resultPanel_->Hide();
                 if (pendingAudioReview_) { const auto item = *pendingAudioReview_; pendingAudioReview_.reset(); SetResult(wxui::toWx(item.message)); ShowReviewWarnings(item.warnings); }
             }
@@ -2039,7 +1991,7 @@ private:
             if (!EditPronunciation({word, {}, {}})) break;
             unknownWords_.erase(std::remove(unknownWords_.begin(), unknownWords_.end(), word), unknownWords_.end());
         }
-        if (unknownWords_.empty()) { SetResult("Pronunciations saved", "Retry to create the LIP using your new pronunciations."); retryButton_->Show(); }
+        if (unknownWords_.empty()) { SetResult("Pronunciations saved", "Retry using your new pronunciations."); retryButton_->Show(); }
         else { SetResult("Some words still need pronunciations", UnknownListText()); addUnknownButton_->Show(); retryButton_->Show(); }
         Layout();
     }
@@ -2218,15 +2170,19 @@ private:
     }
 
     void BindEditor() {
+        for (int id : {ID_SaveLipEditor, ID_SaveLipEditorAs})
+            Bind(wxEVT_UPDATE_UI, [this](wxUpdateUIEvent& e) { e.Enable(!running_ && !lipEditorEntries_.empty()); }, id);
+        UpdateDocumentState();
         Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { SaveLipEditor(false); }, ID_SaveLipEditor);
-        Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { SaveLipEditor(true); }, ID_SaveLipEditorAs);
+        Bind(wxEVT_MENU, [this](wxCommandEvent&) { SaveLipEditor(false); }, ID_SaveLipEditor);
+        Bind(wxEVT_MENU, [this](wxCommandEvent&) { SaveLipEditor(true); }, ID_SaveLipEditorAs);
         Bind(wxEVT_BUTTON, &MainFrame::OnInsertLipKey, this, ID_InsertLipKey);
         Bind(wxEVT_BUTTON, &MainFrame::OnDeleteLipKeys, this, ID_DeleteLipKeys);
         Bind(wxEVT_BUTTON, &MainFrame::OnShiftLipKeys, this, ID_ShiftLipKeys);
-        Bind(wxEVT_BUTTON, &MainFrame::OnRepairLipKeys, this, ID_RepairLipKeys);
+        Bind(wxEVT_MENU, &MainFrame::OnRepairLipKeys, this, ID_RepairLipKeys);
         Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { RestoreLipEdit(false); }, ID_UndoLip);
         Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { RestoreLipEdit(true); }, ID_RedoLip);
-        Bind(wxEVT_BUTTON, &MainFrame::OnSetLipDuration, this, ID_SetLipDuration);
+        Bind(wxEVT_MENU, &MainFrame::OnSetLipDuration, this, ID_SetLipDuration);
         Bind(wxEVT_BUTTON, &MainFrame::OnTimelinePlayCursor, this, ID_TimelinePlayCursor);
         Bind(wxEVT_CHOICE, &MainFrame::OnTimelineShapeChanged, this, ID_TimelineShapeChanged);
         Bind(wxEVT_SLIDER, &MainFrame::OnTimelineZoomChanged, this, ID_TimelineZoomChanged);
@@ -2241,36 +2197,31 @@ private:
             }
             event.Skip();
         });
-        timelineLipPicker_->Bind(wxEVT_FILEPICKER_CHANGED, [this](wxFileDirPickerEvent& event) {
-            if (!running_ && ConfirmLipEditorChanges()) LoadLipEditorPath(event.GetPath());
-            else timelineLipPicker_->SetPath(ToWx(editorPath_));
-        });
-        timelineAudioPicker_->Bind(wxEVT_FILEPICKER_CHANGED, [this](wxFileDirPickerEvent&) { ReloadTimelineAudio(); });
     }
     void LoadLipEditorPath(const wxString& path,const fs::path& knownAudio={},int channel=-1,
                            const std::vector<neolip::AlignedWord>& words={},const std::string& transcript={}) {
-        StopPlayback(); if (timelinePanel_) timelinePanel_->SetRange(0, 0); loopSelection_->SetValue(false); presetPreviewAvailable_ = false;
-        if (previewMovement_) previewMovement_->Enable(false);
+        StopPlayback(); if (timelinePanel_) timelinePanel_->SetRange(0, 0); loopSelection_->SetValue(false); canRegenerate_ = false;
         if (running_) return;
         try {
             if (!IsRegularFile(path)) throw std::runtime_error("Choose an existing .lip file.");
             double duration = 0;
             auto entries = cslu::readKotorKeyframes(ToPath(path), &duration);
             editorPath_ = ToPath(path); lipEditorEntries_ = std::move(entries); timelineEntries_ = lipEditorEntries_;
-            timelineLipDuration_ = duration; lipEditorDirty_ = false; timelineLipPicker_->SetPath(path);
-            savedLip_ = {lipEditorEntries_, timelineLipDuration_}; undoLip_.clear(); redoLip_.clear();presetOnlyChange_=false;
+            timelineLipDuration_ = duration; lipEditorDirty_ = false; editorHasSavedFile_ = true;
+            savedLip_ = {lipEditorEntries_, timelineLipDuration_}; undoLip_.clear(); redoLip_.clear();generatedPreview_=false;
             editorInput_=knownAudio;editorChannel_=channel;SetEditorWords(words,transcript);
-            timelineAudio_.reset(); playback_.load({}); timelineAudioPicker_->SetPath(wxString{});
-            RefreshLipGrid(); RefreshTimelinePanel(); notebook_->SetSelection(1);
+            timelineAudio_.reset(); playback_.load({}); wavPicker_->SetPath(wxString{});
+            RefreshLipGrid(); RefreshTimelinePanel(); notebook_->SetSelection(0);
             resultPanel_->Hide(); wxui::setStatusText(*this, "Loaded " + ToWx(editorPath_.filename()));
             const auto audio = knownAudio.empty()?neolip::matchingAudio(editorPath_):knownAudio;
-            editorInput_=audio;
-            if (!audio.empty()) { timelineAudioPicker_->SetPath(ToWx(audio)); ReloadTimelineAudio(); }
-        } catch (const std::exception& e) { timelineLipPicker_->SetPath(ToWx(editorPath_)); ShowProblem(e.what()); }
+            editorInput_=audio; lastAudio_=audio; createOutput_=editorPath_;
+            SetTranscript(transcript, ""); UpdateOutputLabel(); wavPicker_->SetPath(ToWx(audio));
+            if (!audio.empty()) ReloadTimelineAudio();
+        } catch (const std::exception& e) { ShowProblem(e.what()); }
     }
     void UseDialogueFolder(const fs::path& directory) {
         if (running_) return;
-        batchSource_->SetSelection(1); notebook_->SetSelection(2);
+        batchSource_->SetSelection(1); notebook_->SetSelection(1);
         batchInput_->SetPath(ToWx(directory)); lastBatchDir_ = ToWx(directory);
         dialogueTlk_->SetPath(wxString{}); batchOutput_.clear();
         dialoguePicker_->SetInitialDirectory(ToWx(directory));
@@ -2286,16 +2237,15 @@ private:
             if (!selected) return false;
             path = *selected;
             if (path.extension().empty()) path += ".lip";
-            if (!ConfirmReplace(path)) return false;
         }
+        if ((saveAs || !editorHasSavedFile_) && !ConfirmReplace(path)) return false;
         try {
             auto entries = lipEditorEntries_;
             neolip::saveEditedLip(path, entries, timelineLipDuration_, fs::exists(path));
             lipEditorEntries_ = std::move(entries); timelineEntries_ = lipEditorEntries_;
             editorPath_ = path; lastOutputDir_ = ToWx(path.parent_path());
-            timelineLipPicker_->SetPath(ToWx(path)); lipEditorDirty_ = false;
-            savedLip_ = {lipEditorEntries_, timelineLipDuration_};presetOnlyChange_=false;
-            if(lastCreate_ && path!=lastCreate_->output){presetPreviewAvailable_=false;previewMovement_->Enable(false);}
+            createOutput_=path; UpdateOutputLabel(); lipEditorDirty_ = false; editorHasSavedFile_ = true;
+            savedLip_ = {lipEditorEntries_, timelineLipDuration_};generatedPreview_=false;
             RefreshLipGrid(); RefreshTimelinePanel(); lastOutput_ = path;
             SetResult("Saved " + ToWx(path.filename())); showFolderButton_->Show(); Layout();
 #ifdef __EMSCRIPTEN__
@@ -2327,7 +2277,7 @@ private:
         if (running_) return;
         StopPlayback(); loopSelection_->SetValue(false);
         timelineAudio_.reset(); playback_.load({}); RefreshTimelinePanel();
-        const auto path = ToPath(timelineAudioPicker_->GetPath());
+        const auto path = ToPath(wavPicker_->GetPath());
         if (path.empty()) { timelineAudio_.reset(); playback_.load({}); RefreshTimelinePanel(); return; }
         const int channel=(path==editorInput_)?editorChannel_:-1;
         if(path!=editorInput_)SetEditorWords({},{});

@@ -4,6 +4,7 @@
 #include "dialogue_batch.hpp"
 #include <neoshared/PathUtf8.hpp>
 #include <atomic>
+#include <cctype>
 #include <csignal>
 #include <iostream>
 #include <stdexcept>
@@ -57,7 +58,8 @@ static int commandMain(int argc, char** argv) {
             out << "NeoLIP " CSLU_APP_VERSION "\n"
                 "Usage: neolip-cli <command> [options]\n"
                 "create <audio> <transcript.txt> <output.lip> [--models <folder>] [--dictionaries <folder>] [--minimal] [--replace] [--channel N]\n"
-                "batch <input folder> <output folder> [--models <folder>] [--dictionaries <folder>] [--minimal] [--replace] [--recursive]\n"
+                "batch <input folder or CSV> <output folder> [--models <folder>] [--dictionaries <folder>] [--minimal] [--replace] [--recursive]\n"
+                "CSV headers: filename,transcript (either order); audio paths are relative to the CSV folder.\n"
                 "dialogue <file.dlg> <game directory or search folder> <output folder> [--tlk dialog.tlk] [--scan-only] [--models <folder>] [--dictionaries <folder>] [--minimal] [--replace]\n"
                 "lookup <word> [--models <folder>] [--dictionaries <folder>] [--user-dictionary <file>]\n"
                 "--help, -h   Show usage without loading assets.\n"
@@ -135,7 +137,12 @@ static int commandMain(int argc, char** argv) {
         }
         if (command == "batch" && positional.size() == 2) {
             if (channel != -1) throw std::runtime_error("Use --channel with single-file creation; batch flags unusual channel layouts for individual review.");
-            const auto plan = neolip::planBatch(neoshared::pathFromUtf8(positional[0]), neoshared::pathFromUtf8(positional[1]), recursive, context);
+            const auto input = neoshared::pathFromUtf8(positional[0]), output = neoshared::pathFromUtf8(positional[1]);
+            auto extension = neoshared::pathToUtf8(input.extension());
+            for (char& c : extension) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            const auto plan = extension == ".csv"
+                ? neolip::planCsvBatch(input, fs::absolute(input).parent_path(), output, context)
+                : neolip::planBatch(input, output, recursive, context);
             if (plan.pairs.empty()) throw std::runtime_error("No matching audio/transcript pairs.");
             for (const auto& problem : plan.problems) std::cerr << "Excluded: " << problem << '\n';
             neolip::Engine engine(engineAssets());

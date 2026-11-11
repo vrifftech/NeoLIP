@@ -530,6 +530,68 @@ BatchPlan planBatch(const fs::path& input, const fs::path& output, bool recursiv
     std::sort(plan.pairs.begin(),plan.pairs.end(),[](const auto& a,const auto& b){return a.audio<b.audio;});
     return plan;
 }
+BatchPlan planCsvBatch(const fs::path& csv, const fs::path& input,
+                       const fs::path& output, const Context& context) {
+    cslu::ScopedWorkControl control(context.work);
+    report(context, "Reading CSV transcripts");
+    const auto text = readTranscript(csv);
+    std::vector<std::vector<std::string>> rows;
+    std::vector<std::string> row;
+    std::string field;
+    bool quoted = false, closed = false;
+    const auto finishField = [&]() {
+        row.push_back(std::move(field)); field.clear(); closed = false;
+    };
+    const auto finishRow = [&]() {
+        finishField();
+        if (std::any_of(row.begin(), row.end(), [](const auto& value) { return !trim(value).empty(); }))
+            rows.push_back(std::move(row));
+        row.clear();
+    };
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        context.work.check();
+        const char c = text[i];
+        if (quoted) {
+            if (c == '"') {
+                if (i + 1 < text.size() && text[i + 1] == '"') { field += '"'; ++i; }
+                else { quoted = false; closed = true; }
+            } else field += c;
+        } else if (c == ',') finishField();
+        else if (c == '\r' || c == '\n') {
+            finishRow();
+            if (c == '\r' && i + 1 < text.size() && text[i + 1] == '\n') ++i;
+        } else if (c == '"' && field.empty() && !closed) quoted = true;
+        else {
+            if (closed || c == '"') throw std::runtime_error("Invalid CSV quoting near record " + std::to_string(rows.size() + 1));
+            field += c;
+        }
+    }
+    if (quoted) throw std::runtime_error("CSV ends inside a quoted field.");
+    if (!field.empty() || !row.empty() || closed) finishRow();
+    if (rows.empty() || rows.front().size() != 2)
+        throw std::runtime_error("CSV requires filename and transcript column headers.");
+    const auto& header = rows.front();
+    const auto name = lower(trim(header[0])), other = lower(trim(header[1]));
+    if (!((name == "filename" && other == "transcript") || (name == "transcript" && other == "filename")))
+        throw std::runtime_error("CSV requires filename and transcript column headers, in either order.");
+    const std::size_t filenameColumn = name == "filename" ? 0 : 1;
+    BatchPlan plan; plan.inputRoot = normalized(input); plan.outputRoot = normalized(output.empty() ? input : output);
+    for (std::size_t i = 1; i < rows.size(); ++i) {
+        context.work.check();
+        const auto label = "CSV row " + std::to_string(i + 1);
+        if (rows[i].size() != 2) throw std::runtime_error(label + ": expected a filename and transcript. Quote text containing commas.");
+        const auto filename = trim(rows[i][filenameColumn]);
+        const auto transcript = trim(rows[i][1 - filenameColumn]);
+        if (filename.empty() || transcript.empty()) throw std::runtime_error(label + ": filename and transcript are required.");
+        BatchItem item;
+        item.audio = (plan.inputRoot / neoshared::pathFromUtf8(filename)).lexically_normal();
+        item.output = plan.outputRoot / item.audio.lexically_relative(plan.inputRoot);
+        item.output.replace_extension(".lip");
+        item.spokenText = transcript; item.sourceLabel = label;
+        plan.pairs.push_back(std::move(item));
+    }
+    return plan;
+}
 BatchResult Engine::batch(const BatchPlan& plan, MouthMovement movement, bool replace,
                          const Context& context, std::function<void(const Result&)> onItem) {
     BatchResult result;

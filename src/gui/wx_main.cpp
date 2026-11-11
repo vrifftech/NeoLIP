@@ -412,6 +412,8 @@ private:
     wxChoice* batchSource_ = nullptr;
     wxPanel* dialogueOptions_ = nullptr;
     wxFilePickerCtrl *dialoguePicker_ = nullptr, *dialogueTlk_ = nullptr;
+    wxPanel* csvOptions_ = nullptr;
+    wxFilePickerCtrl* csvPicker_ = nullptr;
     wxStaticText *batchIntro_ = nullptr, *batchInputLabel_ = nullptr;
     wxButton* batchScan_ = nullptr;
     std::optional<neolip::DialoguePlan> dialoguePlan_;
@@ -549,8 +551,8 @@ private:
         auto* menuBar = new wxMenuBar(); auto* file = new wxMenu();
         auto* open = file->Append(wxID_OPEN, "&Open...\tCtrl+O");
         Bind(wxEVT_MENU, [this](wxCommandEvent&) {
-            wxui::requestOpenFile(this, "Open audio, LIP or dialogue",
-                "NeoLIP files|*.wav;*.WAV;*.mp3;*.MP3;*.lip;*.LIP;*.dlg;*.DLG;*.txt;*.lab|All files|*",
+            wxui::requestOpenFile(this, "Open audio, LIP, dialogue or CSV",
+                "NeoLIP files|*.wav;*.WAV;*.mp3;*.MP3;*.lip;*.LIP;*.dlg;*.DLG;*.csv;*.CSV;*.txt;*.lab|All files|*",
                 [this](std::optional<fs::path> path) { if (path) HandleDrop(wxArrayString{ToWx(*path)}); });
         }, open->GetId());
         file->Append(wxID_NEW, "&New\tCtrl+N");
@@ -857,7 +859,8 @@ private:
         auto* sourceRow = new wxBoxSizer(wxHORIZONTAL);
         sourceRow->Add(new wxStaticText(panel, wxID_ANY, "Source"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(8));
         batchSource_ = new wxChoice(panel, wxID_ANY);
-        batchSource_->Append("Audio + transcript files"); batchSource_->Append("Dialogue (DLG)"); batchSource_->SetSelection(0);
+        batchSource_->Append("Audio + transcript files"); batchSource_->Append("Dialogue (DLG)");
+        batchSource_->Append("CSV (audio + transcript)"); batchSource_->SetSelection(0);
         sourceRow->Add(batchSource_, 1, wxEXPAND);
         outer->Add(sourceRow, 0, wxEXPAND | wxALL, FromDIP(12));
         batchIntro_ = new wxStaticText(panel, wxID_ANY, "Match each WAV or MP3 with a same-name .txt or .lab transcript.");
@@ -873,6 +876,11 @@ private:
         advanced->Bind(wxEVT_COLLAPSIBLEPANE_CHANGED, [this](wxCollapsiblePaneEvent&) { Layout(); });
         dlgFields->Add(advanced, 0, wxEXPAND | wxBOTTOM, FromDIP(8));
         outer->Add(dialogueOptions_, 0, wxEXPAND | wxLEFT | wxRIGHT, FromDIP(12)); dialogueOptions_->Hide();
+        csvOptions_ = new wxPanel(panel); auto* csvFields = new wxBoxSizer(wxVERTICAL); csvOptions_->SetSizer(csvFields);
+        csvFields->Add(new wxStaticText(csvOptions_, wxID_ANY, "CSV file"), 0, wxBOTTOM, FromDIP(4));
+        csvPicker_ = new wxFilePickerCtrl(csvOptions_, wxID_ANY, wxString{}, "Choose transcripts CSV", "CSV files (*.csv)|*.csv;*.CSV", wxDefaultPosition, wxDefaultSize, wxFLP_OPEN | wxFLP_FILE_MUST_EXIST | wxFLP_USE_TEXTCTRL);
+        csvFields->Add(csvPicker_, 0, wxEXPAND | wxBOTTOM, FromDIP(8));
+        outer->Add(csvOptions_, 0, wxEXPAND | wxLEFT | wxRIGHT, FromDIP(12)); csvOptions_->Hide();
         batchInputLabel_ = new wxStaticText(panel, wxID_ANY, "Audio/transcript folder");
         outer->Add(batchInputLabel_, 0, wxLEFT | wxRIGHT | wxBOTTOM, FromDIP(12));
         batchInput_ = new wxDirPickerCtrl(panel, wxID_ANY, wxString{}, "Choose a game directory or any search folder");
@@ -921,6 +929,7 @@ private:
             batchOutput_.clear(); lastBatchDir_ = batchInput_->GetPath(); InvalidateBatch(); ScanBatch();
         });
         batchSource_->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) { UpdateBatchMode(); InvalidateBatch(); });
+        csvPicker_->Bind(wxEVT_FILEPICKER_CHANGED, [this](wxFileDirPickerEvent& event) { UseCsvFile(ToPath(event.GetPath())); });
         dialoguePicker_->Bind(wxEVT_FILEPICKER_CHANGED, [this](wxFileDirPickerEvent&) {
             batchOutput_.clear();
             if (batchInput_->GetPath().empty()) batchInput_->SetPath(ToWx(ToPath(dialoguePicker_->GetPath()).parent_path()));
@@ -1380,7 +1389,7 @@ private:
     }
     bool HandleDrop(const wxArrayString& files) {
         if (running_ || files.empty()) return false;
-        if (files.size() != 1) { ShowProblem("Drop one WAV, MP3, LIP, DLG, transcript or folder. Use Batch for multiple recordings."); return false; }
+        if (files.size() != 1) { ShowProblem("Drop one WAV, MP3, LIP, DLG, CSV, transcript or folder. Use Batch for multiple recordings."); return false; }
         const auto path = ToPath(files[0]);
         try {
             if (fs::is_directory(path)) {
@@ -1389,6 +1398,7 @@ private:
                 batchOutput_.clear(); lastBatchDir_ = ToWx(path); InvalidateBatch(); ScanBatch(); return true;
             }
             const auto ext = wxFileName(files[0]).GetExt().Lower();
+            if (ext == "csv") { UseCsvFile(path); return true; }
             if (ext == "dlg") {
                 notebook_->SetSelection(1); batchSource_->SetSelection(1); UpdateBatchMode();
                 dialoguePicker_->SetPath(ToWx(path));
@@ -1398,7 +1408,7 @@ private:
             if (ext == "wav" || ext == "mp3") { notebook_->SetSelection(0); return AudioSelected(path); }
             if (ext == "lip") { if (ConfirmDiscardTranscript() && ConfirmLipEditorChanges()) LoadLipEditorPath(files[0]); return true; }
             if (ext == "txt" || ext == "lab") { notebook_->SetSelection(0); ImportTranscript(path); return true; }
-            ShowProblem("Drop a WAV, LIP, DLG, .txt/.lab transcript, or a batch folder.");
+            ShowProblem("Drop a WAV, MP3, LIP, DLG, CSV, .txt/.lab transcript, or a batch folder.");
         } catch (const std::exception& e) { ShowProblem(e.what()); }
         return false;
     }
@@ -1463,16 +1473,23 @@ private:
         } catch (const std::exception& e) { ShowProblem(e.what()); }
     }
     bool DialogueMode() const { return batchSource_ && batchSource_->GetSelection() == 1; }
+    bool CsvMode() const { return batchSource_->GetSelection() == 2; }
+    void UseCsvFile(const fs::path& path) {
+        notebook_->SetSelection(1); batchSource_->SetSelection(2);
+        csvPicker_->SetPath(ToWx(path)); batchInput_->SetPath(ToWx(path.parent_path()));
+        batchOutput_.clear(); UpdateBatchMode(); InvalidateBatch(); ScanBatch();
+    }
     fs::path BatchOutputPath() const {
         if (!batchOutput_.empty()) return batchOutput_;
         return DialogueMode() ? neolip::defaultDialogueOutput(ToPath(dialoguePicker_->GetPath())) : ToPath(batchInput_->GetPath());
     }
     void UpdateBatchMode() {
-        const bool dlg = DialogueMode(); dialogueOptions_->Show(dlg);
+        const bool dlg = DialogueMode(), csv = CsvMode(); dialogueOptions_->Show(dlg); csvOptions_->Show(csv);
         wxListItem heading; heading.SetText(dlg ? "Dialogue line / LIP" : "Audio"); batchList_->SetColumn(0, heading);
         batchScan_->SetLabel("Rescan");
-        batchInputLabel_->SetLabel(dlg ? "Game directory / search folder (all subfolders are searched automatically)" : "Audio/transcript folder");
-        batchIntro_->SetLabel(dlg ? "Choose a DLG and a game directory or any folder. Sound and VO_ResRef recordings are resolved automatically; review only unresolved lines." : "Match each WAV or MP3 with a same-name .txt or .lab transcript.");
+        batchInputLabel_->SetLabel(dlg ? "Game directory / search folder (all subfolders are searched automatically)" : csv ? "Audio folder (CSV filenames are relative to this folder)" : "Audio/transcript folder");
+        batchIntro_->SetLabel(dlg ? "Choose a DLG and a game directory or any folder. Sound and VO_ResRef recordings are resolved automatically; review only unresolved lines." : csv ? "CSV headers: filename,transcript (either order). Quote text containing commas. Separate TXT files are not needed." : "Match each WAV or MP3 with a same-name .txt or .lab transcript.");
+        batchIntro_->Wrap(std::max(350, GetClientSize().GetWidth() - 70));
         Layout();
     }
     void InvalidateBatch() {
@@ -1593,6 +1610,12 @@ private:
     }
     void OpenBatchRow(long row) {
         if (dialoguePlan_ && batchRowResults_.empty()) { ReviewDialogueRow(row); return; }
+        if (CsvMode() && batchRowResults_.empty() && row >= 0) {
+            const auto& item = batchPlan_.pairs.at(static_cast<std::size_t>(row));
+            if (!AudioSelected(item.audio)) return;
+            SetTranscript(*item.spokenText, wxui::toWx(item.sourceLabel));
+            createOutput_ = item.output; UpdateOutputLabel(); notebook_->SetSelection(0); return;
+        }
         const auto index=BatchIndex(row);if(running_||!index)return;
         const auto item=batchRowResults_[*index];
         if(item.status==neolip::Status::Created||item.status==neolip::Status::Skipped){
@@ -1605,7 +1628,7 @@ private:
         else {
             if (!item.sourceLabel.empty() && item.input == lastAudio_ && !ConfirmDiscardTranscript()) return;
             if (!AudioSelected(item.input)) return;
-            if (!item.sourceLabel.empty()) SetTranscript(item.transcript, wxui::toWx(item.sourceLabel + " (DLG)"));
+            if (!item.sourceLabel.empty()) SetTranscript(item.transcript, wxui::toWx(item.sourceLabel));
             createOutput_=item.output;createChannel_=item.audioChannel;UpdateOutputLabel();notebook_->SetSelection(0);SetResult("Review this input",wxui::toWx(item.message));
         }
     }
@@ -1634,6 +1657,13 @@ private:
                 message.dialogue = std::make_shared<neolip::DialoguePlan>(neolip::planDialogue(request, context));
                 message.plan = message.dialogue->batch; return message;
             });
+        } else if (CsvMode()) {
+            const auto csv = ToPath(csvPicker_->GetPath());
+            if (csv.empty()) { SetResult("Choose a CSV file first"); return; }
+            StartJob([csv, input, output](const neolip::Context& context) {
+                UiMessage message; message.kind = UiMessage::Kind::Plan;
+                message.plan = neolip::planCsvBatch(csv, input, output, context); return message;
+            });
         } else StartJob([input, output, recursive](const neolip::Context& context) {
             UiMessage message; message.kind = UiMessage::Kind::Plan;
             message.plan = neolip::planBatch(input, output, recursive, context); return message;
@@ -1654,6 +1684,8 @@ private:
             text += wxString::Format("\n%zu recordings indexed under the selected folder.", dialoguePlan_->recordingsIndexed);
             text += dialoguePlan_->request.talkTable.empty() ? wxString("\nNo TLK selected/found; embedded text only.") : "\nTLK: " + ToWx(dialoguePlan_->request.talkTable);
             batchOutputLabel_->SetLabel("Output: " + ToWx(batchPlan_.outputRoot));
+        } else if (CsvMode()) {
+            text = wxString::Format("%zu CSV audio/transcript pairs; %zu existing LIPs.", count, existing);
         } else {
             text = wxString::Format("%zu matching audio/transcript pairs; %zu audio files without transcripts; %zu existing LIPs.", count, batchPlan_.missingTranscripts.size(), existing);
             if (!batchPlan_.problems.empty()) text += wxString::Format(" %zu conflicting inputs are excluded; unaffected pairs can be processed.",batchPlan_.conflicts.size());
@@ -1757,7 +1789,8 @@ private:
             }
             for (const auto& pair : batchPlan_.pairs) {
                 const long row = batchList_->InsertItem(batchList_->GetItemCount(), ToWx(pair.audio.lexically_relative(batchPlan_.inputRoot)));
-                batchList_->SetItem(row, 1, "Transcript found: " + ToWx(pair.transcript.filename()));
+                batchList_->SetItem(row, 1, pair.spokenText ? wxui::toWx(pair.sourceLabel) : "Transcript found: " + ToWx(pair.transcript.filename()));
+                if (pair.spokenText) batchList_->SetItem(row, 2, wxui::toWx(*pair.spokenText));
             }
             for (const auto& pair : batchPlan_.conflicts) {
                 const long row=batchList_->InsertItem(batchList_->GetItemCount(),ToWx(pair.audio.lexically_relative(batchPlan_.inputRoot)));

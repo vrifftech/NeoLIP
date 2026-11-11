@@ -87,7 +87,7 @@ bool validExistingLip(const fs::path& file);
 struct BatchItem {
     fs::path audio, transcript, output;
     int audioChannel = -1;
-    std::optional<std::string> spokenText = std::nullopt; // DLG/TLK snapshot; no temporary TXT.
+    std::optional<std::string> spokenText = std::nullopt; // Inline batch transcript; no temporary TXT.
     std::string sourceLabel{};
 };
 struct SourceSnapshot { fs::path path; std::string fingerprint; };
@@ -102,6 +102,8 @@ struct BatchPlan {
 };
 BatchPlan planBatch(const fs::path& input, const fs::path& output,
                     bool recursive, const Context& context = {});
+BatchPlan planCsvBatch(const fs::path& csv, const fs::path& input,
+                       const fs::path& output, const Context& context = {});
 struct BatchResult {
     std::vector<Result> items;
     std::size_t created = 0, skipped = 0, failed = 0;

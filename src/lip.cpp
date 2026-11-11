@@ -618,9 +618,12 @@ LipFile phnToLip(const PhnFile& phn, LipTailRestOptions tailRest, LipQualityOpti
         std::vector<PoseSpan> compact;
         for (const auto& span : spans) {
             // Judge brief reversals after anticipation and target fitting.
-            // A spoken EE may coarticulate; actual pauses and contacts remain.
+            // Require a brief sound as well as brief motion. Keep separate
+            // contacts and the mouth opening between them.
             if (compact.size() >= 2 && compact[compact.size() - 2].shape == span.shape &&
                 !compact.back().pause && !isMouthContact(compact.back().shape) &&
+                !isMouthContact(span.shape) &&
+                std::lround((compact.back().end - compact.back().start) * 1000.0) < 40 &&
                 std::lround((span.arrival - compact.back().arrival) * 1000.0) <= 40) {
                 compact.pop_back();
                 compact.back().end = span.end;

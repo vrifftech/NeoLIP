@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/vrifftech/NeoLIP/actions/workflows/ci.yml/badge.svg)](https://github.com/vrifftech/NeoLIP/actions/workflows/ci.yml)
 
-NeoLIP is a wxWidgets application for generating KotOR-compatible `.lip` files from dialogue audio and transcripts using the bundled CSLU/Festival/OGI alignment assets and the KotOR pronunciation dictionary.
+NeoLIP is an application for creating KotOR-compatible `.lip` files from dialogue audio and transcripts using the bundled CSLU/Festival/OGI alignment assets and pronunciation dictionary.
 
 ```text
 WAV + TXT -> KotOR .lip
@@ -21,7 +21,7 @@ third_party/cslu_runtime/    required alignment models and dictionaries
 docs/                        asset provenance, notices, attribution, and licenses
 ```
 
-NeoLIP consumes common wxWidgets infrastructure from the separate `neoshared` repository. Its private TLK unknown-word scanner also uses `neoshared::tlk` instead of carrying a second binary TLK parser. Clone them as siblings:
+NeoLIP uses common infrastructure from the separate `neoshared` repository. Clone them as siblings:
 
 ```text
 workspace/
@@ -56,23 +56,6 @@ Windows GUI build with the shared, pinned wxWidgets 3.3.3 overlay:
   -Parallel ([Environment]::ProcessorCount)
 ```
 
-A successful GUI build produces `build/NeoLIP` on a single-configuration Unix build or `build/Release/NeoLIP.exe` with the Visual Studio Release configuration. The build scripts fail if the GUI was requested but that executable was not produced.
-
-To create the same self-contained tree published by GitHub Actions:
-
-```sh
-cmake --install build --config Release --prefix stage
-```
-
-The resulting application is `stage/bin/NeoLIP` on Linux or `stage\NeoLIP.exe` on Windows. Models and dictionaries are installed under the same `stage` root.
-
-NeoLIP builds the desktop application by default. A normal successful build produces both:
-
-```text
-NeoLIP              desktop application
-neolip_backend      required private worker
-```
-
 
 ## Use NeoLIP
 
@@ -101,6 +84,3 @@ Pronunciation maintenance is available from **Tools > Pronunciation Dictionary..
 Pronunciation and alignment intermediates remain internal to WAV/TXT-to-LIP generation. PHN files may optionally be loaded as a visual overlay in the editor.
 
 The Windows package puts `NeoLIP.exe` at its top level. `neolip_backend.exe`, `models/`, and `dictionaries/` are required runtime components; the workflow refuses to publish an archive unless all four are present.
-
-The source tree includes the runtime assets under `third_party/cslu_runtime`.
-

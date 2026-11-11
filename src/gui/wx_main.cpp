@@ -2452,6 +2452,7 @@ public:
     bool OnInit() override {
         if (!wxApp::OnInit()) return false;
         SetAppName("NeoLIP");
+        wxui::initializeTheme(kConfigName);
         auto* frame = new MainFrame(); frame->Show();
         return true;
     }

@@ -266,7 +266,7 @@ bool isRestOrPausePhone(const std::string& phoneIn) {
 }
 
 int anticipationMsForShape(std::uint8_t shape, const LipQualityOptions& post) {
-    // Nonzero values are opt-in authoring settings, not game rules.
+    // Mouth contacts prepare ahead of their aligned sound in Natural.
     switch (shape) {
         case 11: return std::max(0, post.anticipateClosuresMs);
         case 8: case 10: return std::max(0, post.anticipateFricativesMs);
@@ -278,7 +278,13 @@ int anticipationMsForShape(std::uint8_t shape, const LipQualityOptions& post) {
 struct PoseSpan {
     double start = 0, end = 0;
     std::uint8_t shape = 0;
+    bool pause = false;
+    double arrival = 0;
 };
+
+bool isMouthContact(std::uint8_t shape) {
+    return shape == 8 || shape == 10 || shape == 11 || shape == 12 || shape == 13 || shape == 15;
+}
 
 std::vector<PoseSpan> phonemeSpans(const PhnFile& phn, const LipQualityOptions& post) {
     std::vector<PoseSpan> spans;
@@ -308,9 +314,11 @@ std::vector<PoseSpan> phonemeSpans(const PhnFile& phn, const LipQualityOptions& 
         }
         const int start = pendingBreathStart >= 0 ? pendingBreathStart : iv.startMs;
         pendingBreathStart = -1;
-        PoseSpan span{start / 1000.0, iv.endMs / 1000.0, static_cast<std::uint8_t>(mouth)};
-        if (!spans.empty() && spans.back().shape == span.shape) spans.back().end = span.end;
-        else spans.push_back(span);
+        PoseSpan span{start / 1000.0, iv.endMs / 1000.0, static_cast<std::uint8_t>(mouth), pause};
+        if (!spans.empty() && spans.back().shape == span.shape) {
+            spans.back().end = span.end;
+            spans.back().pause |= pause;
+        } else spans.push_back(span);
     }
     return spans;
 }
@@ -565,40 +573,76 @@ LipFile phnToLip(const PhnFile& phn, LipTailRestOptions tailRest, LipQualityOpti
     const double duration = (audioMs + tailMs) / 1000.0;
     LipFile lip;
     lip.durationSeconds = static_cast<float>(duration);
-    if (spans.empty()) spans.push_back({0, duration, 0});
-    if (spans.front().start > 0 || spans.front().shape != 0)
-        spans.insert(spans.begin(), {0, spans.front().start, 0});
+    if (spans.empty()) spans.push_back({0, duration, 0, true});
+    if (spans.front().start > 0)
+        spans.insert(spans.begin(), {0, spans.front().start, 0, true});
     if (tailMs > 0) {
         if (spans.back().shape == 0) spans.back().end = duration;
-        else spans.push_back({audioMs / 1000.0, duration, 0});
+        else spans.push_back({audioMs / 1000.0, duration, 0, true});
     }
 
-    std::vector<double> arrivals(spans.size(), 0.0);
     for (std::size_t i = 1; i < spans.size(); ++i) {
         const auto& previous = spans[i - 1];
-        const auto& current = spans[i];
+        auto& current = spans[i];
         const double desired = current.start - anticipationMsForShape(current.shape, post) / 1000.0;
-        // Any opt-in anticipation is bounded by the predecessor's midpoint and
-        // target arrival. It can never reorder adjacent articulations.
-        const double lower = std::max(arrivals[i - 1], (previous.start + previous.end) / 2.0);
-        arrivals[i] = std::max(desired, lower);
-        if (arrivals[i] <= arrivals[i - 1]) {
-            const double available = current.end - arrivals[i - 1];
-            arrivals[i] = arrivals[i - 1] + std::min(0.005, available / 2.0);
+        current.arrival = std::max(desired, (previous.start + previous.end) / 2.0);
+        if (post.preserveEveryPose) {
+            current.arrival = std::max(current.arrival, previous.arrival);
+            if (current.arrival <= previous.arrival)
+                current.arrival += std::min(0.005, (current.end - previous.arrival) / 2.0);
+            if (!(current.arrival < current.end)) throw std::runtime_error("No time remains for a mouth pose target.");
         }
-        if (!(arrivals[i] < current.end)) throw std::runtime_error("No time remains for a mouth pose target.");
+    }
+    if (!post.preserveEveryPose) {
+        // Fit crowded targets together, keeping their order and clip endpoints.
+        // Pool decreasing offsets to find the closest times spaced 20 ms apart.
+        const double spacing = std::min(0.020, duration / (spans.size() + 1));
+        std::vector<std::pair<double, std::size_t>> blocks;
+        for (std::size_t i = 0; i < spans.size(); ++i) {
+            blocks.emplace_back(spans[i].arrival - i * spacing, 1);
+            while (blocks.size() >= 2) {
+                auto& a = blocks[blocks.size() - 2];
+                const auto& b = blocks.back();
+                if (a.first / a.second <= b.first / b.second) break;
+                a.first += b.first; a.second += b.second;
+                blocks.pop_back();
+            }
+        }
+        std::size_t i = 0;
+        for (const auto& block : blocks) {
+            const double offset = std::clamp(block.first / block.second,
+                0.0, duration - spans.size() * spacing);
+            for (std::size_t n = 0; n < block.second; ++n, ++i)
+                spans[i].arrival = offset + i * spacing;
+        }
+        std::vector<PoseSpan> compact;
+        for (const auto& span : spans) {
+            // Judge brief reversals after anticipation and target fitting.
+            // A spoken EE may coarticulate; actual pauses and contacts remain.
+            if (compact.size() >= 2 && compact[compact.size() - 2].shape == span.shape &&
+                !compact.back().pause && !isMouthContact(compact.back().shape) &&
+                std::lround((span.arrival - compact.back().arrival) * 1000.0) <= 40) {
+                compact.pop_back();
+                compact.back().end = span.end;
+                compact.back().pause |= span.pause;
+            } else compact.push_back(span);
+        }
+        spans = std::move(compact);
     }
 
-    // These are authoring policies, not numeric constants from the
-    // game. Both presets preserve every distinct pose and both hold endpoints.
-    // Natural blends over at most 40ms; Minimal over at most 10ms. A transition
-    // never consumes more than half the time between neighboring arrivals.
+    // Natural uses the available interval, with a short hold for contacts.
+    // Minimal retains the original half-interval holds and every mapped pose.
     const double transition = (post.maxBlendMs > 0 ? post.maxBlendMs : 10) / 1000.0;
     for (std::size_t i = 0; i < spans.size(); ++i) {
-        appendGeneratedKey(lip, arrivals[i], spans[i].shape);
+        appendGeneratedKey(lip, spans[i].arrival, spans[i].shape);
         if (i + 1 < spans.size()) {
-            const double gap = arrivals[i + 1] - arrivals[i];
-            const double holdEnd = arrivals[i + 1] - std::min(transition, gap / 2.0);
+            const double gap = spans[i + 1].arrival - spans[i].arrival;
+            const bool contact = isMouthContact(spans[i].shape);
+            const double hold = post.preserveEveryPose ? gap / 2.0 :
+                contact ? std::min(0.020, gap / 4.0) : 0.0;
+            // Keep sustained contacts closed until a short release into the next pose.
+            const double blend = !post.preserveEveryPose && contact ? std::min(transition, 0.040) : transition;
+            const double holdEnd = spans[i + 1].arrival - std::min(blend, gap - hold);
             appendGeneratedKey(lip, holdEnd, spans[i].shape);
         } else {
             // Preserve the final spoken pose when there is no trailing silence.

@@ -10,6 +10,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cctype>
 #include <cerrno>
 #include <fstream>
@@ -176,6 +177,29 @@ cslu::TextToNtpOptions textOptions(const Assets& assets) {
     opt.failOnUnknown = false;
     return opt;
 }
+void weightQuietPauses(cslu::Matrix& probabilities, const cslu::TraceGraph& graph,
+                       const cslu::Matrix& energy) {
+    const auto pause = static_cast<std::size_t>(std::find(graph.uniqueStates.begin(),
+        graph.uniqueStates.end(), "<.pau>") - graph.uniqueStates.begin());
+    // Energy is relative to this recording's floor and speech level. At 5 ms
+    // per frame, require 200 ms of quiet; reach full weight after 300 ms.
+    for (std::size_t begin = 0; begin < probabilities.rows;) {
+        if (energy(begin, 0) >= 0.2) { ++begin; continue; }
+        std::size_t end = begin + 1;
+        while (end < probabilities.rows && energy(end, 0) < 0.2) ++end;
+        if (end - begin > 40) {
+            const double persistence = std::min(1.0, (end - begin - 40) / 20.0);
+            for (auto frame = begin; frame < end; ++frame) {
+                const double bonus = 4.0 * persistence * (1.0 - energy(frame, 0) / 0.2);
+                // Multiplication adds this bonus to the aligner's log score.
+                // Only the graph's existing word-boundary pause paths benefit.
+                probabilities(frame, pause) = std::max(probabilities(frame, pause),
+                    cslu::ViterbiOptions{}.observationProbFloor) * std::exp(bonus);
+            }
+        }
+        begin = end;
+    }
+}
 fs::path sameStem(const fs::path& source, const std::vector<std::string>& extensions) {
     const auto parent = source.has_parent_path() ? source.parent_path() : fs::path(".");
     // Stable priority: .txt before .lab, exact case before a case-insensitive
@@ -221,10 +245,13 @@ cslu::LipFile validateWritten(const fs::path& path) {
 
 cslu::LipQualityOptions qualityFor(MouthMovement movement) {
     cslu::LipQualityOptions quality;
-    // Both modes use the same phoneme alignment and preserve pose/hold order.
-    // Only the bounded blend window differs; neither drops short phonemes.
+    // Both modes share acoustic alignment; only the authored mouth motion differs.
     if (movement == MouthMovement::MinimalSmoothing) {
+        quality.preserveEveryPose = true;
         quality.maxBlendMs = 10;
+        quality.anticipateClosuresMs = 0;
+        quality.anticipateFricativesMs = 0;
+        quality.anticipateStopsMs = 0;
     }
     return quality;
 }
@@ -383,8 +410,10 @@ Result Engine::preview(const CreateRequest& request, const Context& context) {
             data.transStatesM=graph.mappings.transStatesM;data.transStatesP=graph.mappings.transStatesP;data.transStatesH=graph.mappings.transStatesH;
             std::array<cslu::Matrix*,6> outputs{{&data.bcMOrig,&data.bcPOrig,&data.bcHOrig,&data.transMOrig,&data.transPOrig,&data.transHOrig}};
             for(std::size_t i=0;i<networks.size();++i){report(context,"Aligning speech");*outputs[i]=impl_->models[i].forwardMatrix(frontend.netin);}
+            auto pauseEnergy=std::move(frontend.intensityEnergyCol0);
             frontend={};report(context,"Aligning speech");
             auto probabilities=cslu::composeBackendProbabilitiesFromOrig(data,20);data={};
+            weightQuietPauses(probabilities.phnProb,graph.graph,pauseEnergy);
             auto alignment=cslu::csluViterbiAlign(graph.graph,probabilities.phnProb,probabilities.transProb);probabilities={};
             auto prepared=std::make_shared<PreparedAlignment>();prepared->fingerprint=key;prepared->audio=audio;
             prepared->warnings=reviewAlignment(*audio,alignment,graph.graph);

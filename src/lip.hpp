@@ -41,12 +41,12 @@ struct LipTailRestOptions {
 struct LipQualityOptions {
     bool closeOnPause = true;
     int closeOnPauseMs = 160;
-    // Maximum blend window; never a rule for deleting nearby keys.
-    // Every distinct mapped pose and both hold anchors are retained.
-    int maxBlendMs = 40;
-    int anticipateClosuresMs = 0;
-    int anticipateFricativesMs = 0;
-    int anticipateStopsMs = 0;
+    // Natural smooths brief reversals and prepares contacts ahead of the sound.
+    bool preserveEveryPose = false;
+    int maxBlendMs = 80;
+    int anticipateClosuresMs = 40;
+    int anticipateFricativesMs = 25;
+    int anticipateStopsMs = 20;
 };
 
 int resolveTailRestMs(int phnDurationMs, const LipTailRestOptions& options);

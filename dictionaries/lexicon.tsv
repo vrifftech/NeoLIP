@@ -66921,7 +66921,7 @@ getter	gc g E tc th 3r
 gettering	gc g E tc th 3r I N
 getters	gc g E tc th 3r z
 gettin'	gc g I tc th ^ n
-getting	gc g E ((tc n) | (d_\( I n) | ((tc th) | d_\() I N))
+getting	gc g E ((tc n) | (d_\( I n) | ((tc th) | d_\() I N)
 getting(2)	gc g I tc th I N
 gettinger	gc g E tc th I N 3r
 gettings	gc g E tc th I N z
@@ -75912,7 +75912,7 @@ heptavalent	h E pc ph tc th & v ei l & n tc th
 heptode	h E pc ph tc th oU dc d
 hepworth	h E pc ph w 3r T
 hepzibah	h E pc ph z & bc b &
-her	(h (3r | &)) | 3r)
+her	(h (3r | &) | 3r)
 her'n	h 3r n
 her's	h 3r z
 her(2)	h 3r

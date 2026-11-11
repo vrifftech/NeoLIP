@@ -577,8 +577,8 @@ private:
         edit->Append(ID_SetLipDuration, "Set duration...");
         edit->Append(ID_RepairLipKeys, "Repair keys..."); menuBar->Append(edit, "&Edit");
         auto* options = new wxMenu(); auto* movement = new wxMenu();
-        naturalMovement_ = movement->AppendRadioItem(wxID_ANY, "Natural");
-        minimalMovement_ = movement->AppendRadioItem(wxID_ANY, "Minimal smoothing");
+        naturalMovement_ = movement->AppendRadioItem(wxID_ANY, "Natural", "Broader blends, consonant preparation, and cleanup of brief non-contact reversals.");
+        minimalMovement_ = movement->AppendRadioItem(wxID_ANY, "Minimal smoothing", "Keep every mapped mouth target with short transitions and no consonant preparation.");
         options->AppendSubMenu(movement, "Mouth movement");
         for (auto* item : {naturalMovement_, minimalMovement_}) {
             Bind(wxEVT_MENU, [this, item](wxCommandEvent&) {

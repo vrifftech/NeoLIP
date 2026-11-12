@@ -23,7 +23,6 @@ struct Assets {
     fs::path userDictionary; // Writable application-data path, not an install asset.
 };
 Assets discoverAssets(const fs::path& executable, const fs::path& userDataDirectory);
-void requireAssets(const Assets& assets);
 
 struct Progress {
     std::string message;

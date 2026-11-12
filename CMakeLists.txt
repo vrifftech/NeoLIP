@@ -66,6 +66,7 @@ endif()
 include(cmake/NeoAudio.cmake)
 
 set(NEOLIP_CORE_SOURCES
+    src/asset_input.cpp
     src/tsv.cpp
     src/nnet45.cpp
     src/phn.cpp
@@ -138,7 +139,7 @@ if(NEOLIP_BUILD_CLI)
 endif()
 
 
-# Runtime assets are installed with either executable; core-only builds install no assets.
+# Runtime assets are embedded on Windows and installed beside the application elsewhere.
 set(NEOLIP_CSLU_RUNTIME_DIR "${CMAKE_CURRENT_LIST_DIR}/third_party/cslu_runtime")
 set(NEOLIP_CSLU_FA_DIR "${NEOLIP_CSLU_RUNTIME_DIR}/Toolkit/2.0/apps/fa")
 set(NEOLIP_BUNDLED_DICTIONARY_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/dictionaries")
@@ -338,7 +339,7 @@ if(NEOLIP_BUILD_WX_GUI)
         else()
             set(_neolip_build_assets "$<TARGET_FILE_DIR:NeoLIP>")
         endif()
-        if(NOT EMSCRIPTEN)
+        if(NOT EMSCRIPTEN AND NOT WIN32)
             add_custom_command(TARGET NeoLIP POST_BUILD
                 COMMAND "${CMAKE_COMMAND}" -E copy_directory
                     "${NEOLIP_BUNDLED_DICTIONARY_ROOT}" "${_neolip_build_assets}/dictionaries"
@@ -389,7 +390,11 @@ if(TARGET neolip-cli)
     endif()
 endif()
 
-if(TARGET NeoLIP OR TARGET neolip-cli)
+if(WIN32)
+    include(cmake/EmbeddedAssets.cmake)
+endif()
+
+if((TARGET NeoLIP OR TARGET neolip-cli) AND NOT WIN32)
     if(APPLE AND TARGET NeoLIP)
         set(NEOLIP_DATA_PREFIX "NeoLIP.app/Contents/Resources/")
     else()

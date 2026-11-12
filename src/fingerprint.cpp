@@ -1,4 +1,5 @@
 #include "fingerprint.hpp"
+#include "asset_input.hpp"
 #include <neoshared/PathUtf8.hpp>
 #include "work_control.hpp"
 #include <algorithm>
@@ -45,6 +46,9 @@ std::string fileFingerprint(const std::filesystem::path& file){
     return h.finish();
 }
 std::string treeFingerprint(const std::filesystem::path& root){
+#ifdef NEOLIP_EMBEDDED_ASSETS
+    if(cslu::isBundledAsset(root))return std::string(cslu::bundledAssetFingerprint());
+#endif
     if(root.empty()||!std::filesystem::exists(root))return sha256("<absent>");
     std::vector<std::filesystem::path> files;for(const auto& f:std::filesystem::recursive_directory_iterator(root))if(f.is_regular_file())files.push_back(f.path());
     std::sort(files.begin(),files.end());std::string list;

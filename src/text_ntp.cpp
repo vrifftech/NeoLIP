@@ -1,3 +1,4 @@
+#include "asset_input.hpp"
 #include "work_control.hpp"
 #include "text_ntp.hpp"
 #include "tsv.hpp"
@@ -515,7 +516,7 @@ static std::string tsvEscapeText(std::string s) {
 }
 
 static std::map<std::string, PronEntry> readLexicon(const std::filesystem::path& path) {
-    std::ifstream in(path, std::ios::binary);
+    AssetInput in(path);
     if (!in) throw std::runtime_error("Cannot read bundled lexicon: " + path.string());
     std::map<std::string, PronEntry> entries;
     std::string line;

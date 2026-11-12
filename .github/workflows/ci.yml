@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 jobs:
@@ -154,37 +154,27 @@ jobs:
         shell: pwsh
         run: cmake --install tool/build --config Release --prefix tool/stage
 
-      - name: Verify Windows application package
-        shell: pwsh
-        run: |
-          $required = @(
-            'tool\stage\NeoLIP.exe',
-            'tool\stage\models',
-            'tool\stage\dictionaries'
-          )
-          foreach ($path in $required) {
-            if (-not (Test-Path -LiteralPath $path)) {
-              throw "NeoLIP package is missing required output: $path"
-            }
-          }
-          cmake -DNEOLIP_PACKAGE_ROOT=tool/stage -P tool/scripts/validate-assets.cmake
-          if ($LASTEXITCODE -ne 0) {
-            throw "NeoLIP's packaged asset check failed with exit code $LASTEXITCODE"
-          }
-          Get-ChildItem -LiteralPath 'tool\stage' | Format-Table Name, Length
-
-      - name: Package Windows application
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path 'tool\package\NeoLIP' | Out-Null
-          Copy-Item -Recurse -Force 'tool\stage\*' 'tool\package\NeoLIP\'
-          Compress-Archive -Path 'tool\package\NeoLIP' -DestinationPath 'tool\NeoLIP-windows-x64.zip' -Force
-
       - name: Upload Windows artifact
         if: ${{ github.event_name != 'pull_request' }}
         uses: actions/upload-artifact@v7
         with:
           name: NeoLIP-windows-vs2026-${{ github.sha }}
-          path: tool/NeoLIP-windows-x64.zip
+          path: tool/stage/NeoLIP.exe
           if-no-files-found: error
           retention-days: 14
+
+  macos:
+    uses: ./.github/workflows/macos.yml
+    secrets: inherit
+
+  release:
+    name: Publish release
+    needs: [linux, windows, macos]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      actions: read
+      contents: write
+    uses: vrifftech/neoshared/.github/workflows/publish-release.yml@main
+    with:
+      version-file: CMakeLists.txt
+      artifact-pattern: NeoLIP-*

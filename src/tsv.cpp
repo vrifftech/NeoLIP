@@ -1,4 +1,5 @@
 #include "tsv.hpp"
+#include "asset_input.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -26,7 +27,7 @@ std::string trimCR(std::string s) {
 }
 
 std::string readTextFile(const std::filesystem::path& path) {
-    std::ifstream in(path, std::ios::binary);
+    AssetInput in(path);
     if (!in) {
         throw std::runtime_error("cannot open file: " + path.string());
     }
@@ -51,7 +52,7 @@ std::vector<std::string> splitTab(const std::string& line) {
 }
 
 Matrix readNumericTsv(const std::filesystem::path& path, std::optional<std::size_t> maxRows) {
-    std::ifstream in(path);
+    AssetInput in(path);
     if (!in) {
         throw std::runtime_error("cannot open numeric TSV: " + path.string());
     }
@@ -97,7 +98,7 @@ Matrix readNumericTsv(const std::filesystem::path& path, std::optional<std::size
 }
 
 std::map<std::string, std::string> readKeyValueTsv(const std::filesystem::path& path) {
-    std::ifstream in(path);
+    AssetInput in(path);
     if (!in) {
         throw std::runtime_error("cannot open key/value TSV: " + path.string());
     }
@@ -124,7 +125,7 @@ std::map<std::string, std::string> readKeyValueTsv(const std::filesystem::path& 
 }
 
 std::vector<std::string> readIndexValueList(const std::filesystem::path& path) {
-    std::ifstream in(path);
+    AssetInput in(path);
     if (!in) {
         throw std::runtime_error("cannot open list TSV: " + path.string());
     }

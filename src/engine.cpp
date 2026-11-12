@@ -150,8 +150,8 @@ struct AssetTreeFingerprints {
 AssetTreeFingerprints cachedAssetTreeFingerprints(const Assets& assets) {
     static std::mutex mutex;
     static std::map<std::string, AssetTreeFingerprints> cache;
-    const std::string key = displayPath(normalized(assets.models)) + "\n" +
-                            displayPath(normalized(assets.dictionaries));
+    const std::string key = displayPath(assets.models) + "\n" +
+                            displayPath(assets.dictionaries);
     std::lock_guard<std::mutex> lock(mutex);
     const auto found = cache.find(key);
     if (found != cache.end()) return found->second;
@@ -256,7 +256,10 @@ cslu::LipQualityOptions qualityFor(MouthMovement movement) {
     return quality;
 }
 Assets discoverAssets(const fs::path& executable, const fs::path& userDataDirectory) {
-#ifdef __EMSCRIPTEN__
+#if defined(NEOLIP_EMBEDDED_ASSETS)
+    (void)executable;
+    return {"@neolip/models", "@neolip/dictionaries", userDataDirectory / "pronunciations.dict"};
+#elif defined(__EMSCRIPTEN__)
     (void)executable;
     return {"/models", "/dictionaries", userDataDirectory / "pronunciations.dict"};
 #else
@@ -274,16 +277,6 @@ Assets discoverAssets(const fs::path& executable, const fs::path& userDataDirect
     }
     throw std::runtime_error("This NeoLIP installation is incomplete. Reinstall NeoLIP; its bundled models or pronunciation dictionaries are missing.");
 #endif
-}
-void requireAssets(const Assets& assets) {
-    std::vector<fs::path> paths = modelFiles(assets.models);
-    const auto dictionaries = dictionaryFiles(assets.dictionaries);
-    paths.insert(paths.end(), dictionaries.begin(), dictionaries.end());
-    for (const auto& path : paths) {
-        std::ifstream stream(path, std::ios::binary);
-        if (!stream || stream.peek() == std::char_traits<char>::eof())
-            throw std::runtime_error("This NeoLIP installation is incomplete. Reinstall NeoLIP.\nMissing or unreadable asset: " + displayPath(path));
-    }
 }
 fs::path defaultLipPath(const fs::path& audio) { auto path = audio; path.replace_extension(".lip"); return path; }
 fs::path matchingTranscript(const fs::path& audio) { return sameStem(audio, {".txt", ".lab"}); }
@@ -349,7 +342,6 @@ struct Engine::Impl {
         if (next != dictionaryFingerprint) { resolver.reset(); prepared.reset(); dictionaryFingerprint = next; }
     }
     explicit Impl(Assets value) : assets(std::move(value)) {
-        requireAssets(assets);
         const auto fingerprints = cachedAssetTreeFingerprints(assets);
         modelFingerprint = fingerprints.models;
         dictionaryBaseFingerprint = fingerprints.dictionaries;

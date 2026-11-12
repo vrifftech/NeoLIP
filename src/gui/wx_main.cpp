@@ -374,7 +374,7 @@ private:
 
 class MainFrame final : public wxFrame {
 public:
-    MainFrame() : wxFrame(nullptr, wxID_ANY, "NeoLIP v1.0.0") {
+    MainFrame() : wxFrame(nullptr, wxID_ANY, "NeoLIP v" CSLU_APP_VERSION) {
         SetIcon(wxIcon(neolip_icon_xpm));
         BuildMenus(); BuildUi(); LoadConfig(); BindEditor();
         Bind(wxEVT_TIMER, [this](wxTimerEvent&) { OnPlaybackTick(); }, playbackTimer_.GetId());
@@ -1025,7 +1025,6 @@ private:
             if (!fs::is_regular_file(path))
                 throw std::runtime_error("The previous custom dictionary is missing. Its saved location has been retained: " + neoshared::pathToUtf8(path));
             const auto assets = neolip::discoverAssets(executable, userData);
-            neolip::requireAssets(assets);
             const auto same = [&](const fs::path& other) {
                 std::error_code ec;
                 return fs::equivalent(path, other, ec) && !ec;
@@ -1062,7 +1061,6 @@ private:
     }
     const neolip::Assets& Assets() {
         if (!assets_) assets_ = neolip::discoverAssets(ToPath(wxStandardPaths::Get().GetExecutablePath()), UserDataPath());
-        neolip::requireAssets(*assets_);
         return *assets_;
     }
     std::shared_ptr<neolip::Engine> SingleEngine() {

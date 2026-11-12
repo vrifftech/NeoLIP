@@ -1,5 +1,6 @@
 #include "work_control.hpp"
 #include "nnet45.hpp"
+#include "asset_input.hpp"
 
 #include <algorithm>
 #include <array>
@@ -47,7 +48,7 @@ static double sigmoid(double x) {
 }
 
 NNet45 NNet45::load(const std::filesystem::path& path) {
-    std::ifstream in(path, std::ios::binary);
+    AssetInput in(path);
     if (!in) {
         throw std::runtime_error("cannot open .45 model: " + path.string());
     }

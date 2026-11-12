@@ -20,9 +20,6 @@
 #endif
 #include <windows.h>
 #endif
-#ifndef CSLU_APP_VERSION
-#define CSLU_APP_VERSION "1.0.0"
-#endif
 namespace fs = std::filesystem;
 namespace {
 volatile std::sig_atomic_t interrupted = 0;

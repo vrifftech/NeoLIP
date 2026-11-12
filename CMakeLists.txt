@@ -5,8 +5,12 @@ if(POLICY CMP0091)
 endif()
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "MSVC runtime library" FORCE)
 
-project(NeoLIP VERSION 1.0.0 LANGUAGES CXX)
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/NeoSharedSource.cmake")
+include("${NEOSHARED_ROOT}/cmake/NeoVersion.cmake")
+neo_read_version_header(NEOLIP_VERSION
+    "${CMAKE_CURRENT_LIST_DIR}/src/core/Version.hpp"
+    NEOLIP_VERSION_STRING)
+project(NeoLIP VERSION ${NEOLIP_VERSION} LANGUAGES CXX)
 
 if(MSVC)
     foreach(_neolip_runtime_flag_var IN ITEMS
@@ -26,7 +30,6 @@ include(GNUInstallDirs)
 
 message(STATUS "Using neoshared: ${NEOSHARED_ROOT}")
 include("${NEOSHARED_ROOT}/cmake/NeoMinimalRelease.cmake")
-include("${NEOSHARED_ROOT}/cmake/NeoVersion.cmake")
 include("${NEOSHARED_ROOT}/cmake/NeoMacOSBundle.cmake")
 include("${NEOSHARED_ROOT}/cmake/NeoWasm.cmake")
 if(NOT TARGET neoshared::wx)

@@ -1,3 +1,4 @@
+#include "NeoUpdater.hpp"
 #include "engine.hpp"
 #include "dialogue_batch.hpp"
 #include "audio.hpp"
@@ -394,13 +395,26 @@ public:
         ApplyDarkMode(settings_.darkMode());
         wxui::setStatusText(*this, "Choose audio and enter its spoken text.");
     }
+#ifndef __EMSCRIPTEN__
+    void PrepareUpdateRestart(neoupdate::RestartDecision decision) {
+        if (running_ && wxMessageBox("Cancel the current operation and restart NeoLIP to install the update?",
+                "Operation in progress", wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION, this) != wxYES) {
+            decision(false);
+            return;
+        }
+        if (!running_) { decision(true); return; }
+        closingAfterJob_ = false;
+        restartAfterJob_ = std::move(decision);
+        cancel_.store(true);
+        resultTitle_->SetLabel("Cancelling safely before installing the update...");
+    }
+#endif
     ~MainFrame() override {
         cancel_.store(true);
 #ifndef __EMSCRIPTEN__
         if (worker_.joinable()) worker_.join();
 #endif
         playbackTimer_.Stop(); playback_.stop();
-        SaveConfig();
     }
 private:
     wxNotebook* notebook_ = nullptr;
@@ -445,6 +459,7 @@ private:
     std::atomic<bool> cancel_{false};
 #ifndef __EMSCRIPTEN__
     std::thread worker_;
+    neoupdate::RestartDecision restartAfterJob_;
 #endif
     neosettings::AppSettings settings_{kConfigName};
     neoview::FontScaleWheelFilter fontScaleWheelFilter_;
@@ -1755,6 +1770,14 @@ private:
         if (worker_.joinable()) worker_.join();
 #endif
         running_ = false; notebook_->Enable(); gauge_->Hide(); cancelButton_->Hide();
+#ifndef __EMSCRIPTEN__
+        if (restartAfterJob_) {
+            auto decision = std::move(restartAfterJob_);
+            restartAfterJob_ = {};
+            decision(true);
+            return;
+        }
+#endif
         if (closingAfterJob_) { CallAfter([this]() { Close(); }); return; }
         switch (message->kind) {
         case UiMessage::Kind::Single: {
@@ -2302,7 +2325,9 @@ private:
         }
         if (event.CanVeto() && !ConfirmLipEditorChanges()) { closingAfterJob_ = false; event.Veto(); return; }
         if (event.CanVeto() && !ConfirmDiscardTranscript()) { closingAfterJob_ = false; event.Veto(); return; }
-        cancel_.store(true); event.Skip();
+        cancel_.store(true);
+        SaveConfig();
+        event.Skip();
     }
     void ReloadTimelineAudio() {
         if (running_) return;
@@ -2452,6 +2477,11 @@ public:
         SetAppName("NeoLIP");
         wxui::initializeTheme(kConfigName);
         auto* frame = new MainFrame(); frame->Show();
+#if !defined(__EMSCRIPTEN__)
+        neoupdate::install(*frame, NEO_UPDATE_APPLICATION, NEO_UPDATE_VERSION,
+            [frame](neoupdate::RestartDecision decision) { frame->PrepareUpdateRestart(std::move(decision)); });
+#endif
+
         return true;
     }
 };

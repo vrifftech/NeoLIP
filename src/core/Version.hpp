@@ -1,3 +1,3 @@
 #pragma once
 
-#define NEOLIP_VERSION_STRING "1.0.3"
+#define NEOLIP_VERSION_STRING "1.0.4"

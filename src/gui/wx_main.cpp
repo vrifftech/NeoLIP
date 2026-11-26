@@ -2477,7 +2477,7 @@ public:
         SetAppName("NeoLIP");
         wxui::initializeTheme(kConfigName);
         auto* frame = new MainFrame(); frame->Show();
-#if !defined(__EMSCRIPTEN__)
+#if defined(NEO_UPDATE_APPLICATION)
         neoupdate::install(*frame, NEO_UPDATE_APPLICATION, NEO_UPDATE_VERSION,
             [frame](neoupdate::RestartDecision decision) { frame->PrepareUpdateRestart(std::move(decision)); });
 #endif
